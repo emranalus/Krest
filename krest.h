@@ -9,6 +9,9 @@
 #define DEFAULT_VECTOR_CAPACITY 16
 #define NULL_TERMINATOR_LEN 1
 
+#define autofree_krstring __attribute__((cleanup(_kr_free_string_ptr)))
+#define autofree_krvector __attribute__((cleanup(_kr_free_vector_ptr)))
+
 // Array list type string object with _size, _capacity and _data fields
 typedef struct {
 
@@ -23,9 +26,16 @@ typedef struct {
 
     size_t _start;
     size_t _end;
-    bool _success;
 
 } KrSlicePos;
+
+// View object for KrString that doesnt own it just peeks into it
+typedef struct {
+
+    char* _data;
+    size_t _size;
+
+} KrStringView;
 
 // Array list object but dynamic due to carrying type _size it can be set to anytype this way
 typedef struct {
@@ -37,19 +47,25 @@ typedef struct {
 
 } KrVector;
 
-// View object for KrString that doesnt own it just peeks into it
-typedef struct {
+// Error codes enum
+typedef enum {
 
-    char* _data;
-    size_t _size;
+    KR_SUCCESS,
+    KR_ERR_MALLOC_FAIL,
+    KR_ERR_REALLOC_FAIL,
+    KR_ERR_NULL_INPUT,
+    KR_ERR_INDEX_OOB,   // Out of Bound
+    KR_ERR_SMALL_INPUT,
+    KR_ERR_NOT_FOUND,
 
-} KrStringView;
+
+} KrError;
 
 // Updates the _capacity by reallocating memory to the _data prop of the KrString object
-bool kr_update_string_capacity(KrString* str);
+bool _kr_update_string_capacity(KrString* str);
 
 // Sets string _capacity to the minimum possible value
-void kr_minimize_string_capacity(KrString* str);
+bool kr_minimize_string_capacity(KrString* str);
 
 // Returns a new KrString object, user needs to free it with kr_free_string or declare it with autofree_krstring
 KrString kr_new_string(const char src[]);
@@ -58,116 +74,205 @@ KrString kr_new_string(const char src[]);
 KrVector kr_new_vector(size_t _type_size);
 
 // Appends src at the end of dst
-void kr_append_string(KrString* dst, const char src[]);
+KrError kr_append_string(KrString* dst, const char src[]);
 
 // Reverses the order of bytes of a given buffer, starting from 0 up to _size - 1
-void kr_reverse_bytes(uint8_t* src, size_t _size);
+KrError kr_reverse_bytes(uint8_t* src, size_t _size);
 
 // Appends src at the end of dst
-void kr_append_to_vector(KrVector* dst, const void* src);
+KrError kr_append_to_vector(KrVector* dst, const void* src);
 
 // Returns a void* user can assign with any type pointer since they defined the _size of each type at vector creation
 void* kr_get_vector_element(const KrVector* src, size_t index);
 
 // Inserts one char into string at specified index
-void kr_insert_char(KrString* dst, char src, size_t index);
+KrError kr_insert_char(KrString* dst, char src, size_t index);
 
 // Inserts src into string at specified index
-void kr_insert_string(KrString* dst, const char src[], size_t index);
+KrError kr_insert_string(KrString* dst, const char src[], size_t index);
 
 // Returns a new KrSting objects containing a slice of the inputted string, excludes last char and includes first char
-KrString kr_slice_string(const KrString* src, size_t start, size_t end);
+KrStringView kr_slice_string(const KrString* src, size_t index, size_t size);
 
 // Returns true if KrString->_data is an empty string
 bool kr_is_empty_string(const KrString* str);
 
-// If inputs are valid returns a KrSlicePos object containing start and end indices also returns a bool prop called success
-// if false both start and end is set to 0 to save on memory management, might change it in the future but the user will
-// have to free the result manually
-// Usage: KrSlicePos.success needs to be checked if false both props will be 0 as mentioned above
+// Returns true if str is not an empty string and is all whitespaces
+bool kr_is_string_all_whitespace(const KrString* str);
+
+// Rreturns a KrSlicePos object containing start and end indices
 KrSlicePos kr_find_substring(const KrString* str, const char src[]);
 
 // Returns a KrVector object containing all occurrences of the substring in the form of KrSlicePos
 KrVector kr_find_all_substrings(const KrString* str, const char src[]);
 
 // Replaces src substring with 'with' substring
-void kr_replace_first_substring(KrString* str, const char src[], const char with[]);
+KrError kr_replace_first_substring(KrString* str, const char src[], const char with[]);
 
 // Replaces all occurrences of src with 'with' substring
-void kr_replace_all_substrings(KrString* str, const char src[], const char with[]);
+KrError kr_replace_all_substrings(KrString* str, const char src[], const char with[]);
 
 // Replaces char at index with 'with'
-void kr_replace_char(KrString* str, char with, size_t index);
-
-// Returns the first char of the string
-char kr_string_starts_with(const KrString* str);
-
-// Returns the last char of the string
-char kr_string_ends_with(const KrString* str);
+KrError kr_replace_char(KrString* str, char with, size_t index);
 
 // Changes strings _data prop
-void kr_set_string_data(KrString* str, const char _data[]);
+KrError kr_set_string_data(KrString* str, const char data[]);
 
-// Splits the str1 in half stores first half in str1 second half in str2, char at index is included in str1
-void kr_split_string(KrString* str1, KrString* str2, size_t index);
-
-// Note: Preallocate once with enough or more _size than you think you will need
-// so KrString doesn't need to do it everytime it reaches its _capacity
-void kr_preallocate_string(KrString* str, size_t capacity);
+// Splits the str1 in half stores first half in str1 second half in str2, char at index is the start of str2
+KrError kr_split_string(KrString* str1, KrString* str2, size_t index);
 
 // Note: Preallocate once with enough or more _size than you think you will need
-// so KrVector doesn't need to do it everytime it reaches its _capacity
-void kr_preallocate_vector(KrVector* vector, size_t size_mb);
+// so KrString doesn't need to reallocate memory everytime it reaches its _capacity
+KrError kr_preallocate_string(KrString* str, size_t capacity);
+
+// Note: Preallocate once with enough or more _size than you think you will need
+// so KrVector doesn't need to reallocate memory everytime it reaches its _capacity
+KrError kr_preallocate_vector(KrVector* vector, size_t size_byte);
 
 // Returns true if strings are equal
 bool kr_is_equal_string(const KrString* str1, const KrString* str2);
 
-// Returns a new KrString object with the same _data prop
-KrString kr_copy_string(const KrString* str);
+// Returns a KrString objects pointing to the same memory as str
+KrString kr_shallow_copy_string(const KrString* str);
+
+// Returns a newly allocated KrString object with the same _data prop
+KrString kr_deep_copy_string(const KrString* str);
 
 // Removes the last element of the string
-void kr_string_pop_back(KrString* str);
+KrError kr_string_pop_back(KrString* str);
 
 // Removes the first element of the string
-void kr_string_pop(KrString* str);
+KrError kr_string_pop(KrString* str);
 
 // Removes whitespaces at the beginning and end of the string
-void kr_trim_string(KrString* src);
+KrError kr_trim_string(KrString* src);
 
 // Free KrVector object from memory
-void kr_free_vector(KrVector* vector);
+KrError kr_free_vector(KrVector* vector);
 
 // Free KrString object from memory
-void kr_free_string(KrString* str);
+KrError kr_free_string(KrString* str);
+
+// autofree macro dispatch functions
+void _kr_free_string_ptr(KrString* s);
+void _kr_free_vector_ptr(KrVector* v);
+
+// Generic error handling macro dispatch functions for each type
+static inline bool _kr_string_is_err(const KrString* s) { return s->_size == SIZE_MAX; }
+static inline bool _kr_vector_is_err(const KrVector* v) { return v->_size == SIZE_MAX; }
+static inline bool _kr_string_view_is_err(const KrStringView* sw) { return sw->_size == SIZE_MAX; }
+static inline bool _kr_slice_pos_is_err(const KrSlicePos* sp) { return sp->_start == SIZE_MAX; }
+static inline bool _kr_error_is_err(const KrError* e) { return *e != KR_SUCCESS; }
+
+static inline KrError _kr_string_get_error(const KrString* s);
+static inline KrError _kr_vector_get_error(const KrVector* v);
+static inline KrError _kr_string_view_get_error(const KrStringView* sw);
+static inline KrError _kr_slice_pos_get_error(const KrSlicePos* sp);
+static inline KrError _kr_error_get_error(const KrError* e);
+
+#define kr_is_error(obj) _Generic((obj),                                       \
+    KrString:       _kr_string_is_err((const KrString*)&(obj)),                \
+    KrVector:       _kr_vector_is_err((const KrVector*)&(obj)),                \
+    KrStringView:   _kr_string_view_is_err((const KrStringView*)&(obj)),       \
+    KrSlicePos:     _kr_slice_pos_is_err((const KrSlicePos*)&(obj)),           \
+    KrError:        _kr_error_is_err((const KrError*)&(obj))                   \
+)
+
+static inline KrError _kr_string_get_error(const KrString* s) { return (KrError)(uintptr_t)s->_data; }
+static inline KrError _kr_vector_get_error(const KrVector* v) { return (KrError)(uintptr_t)v->_data; }
+static inline KrError _kr_string_view_get_error(const KrStringView* sw) { return (KrError)(uintptr_t)sw->_data; }
+static inline KrError _kr_slice_pos_get_error(const KrSlicePos* sp) { return (KrError)(uintptr_t)sp->_end; }
+static inline KrError _kr_error_get_error(const KrError* e) { return *e; }
+
+#define kr_get_error(obj) _Generic((obj),                                       \
+    KrString:       _kr_string_get_error((const KrString*)&(obj)),              \
+    KrVector:       _kr_vector_get_error((const KrVector*)&(obj)),              \
+    KrStringView:   _kr_string_view_get_error((const KrStringView*)&(obj)),     \
+    KrSlicePos:     _kr_slice_pos_get_error((const KrSlicePos*)&(obj)),         \
+    KrError:        _kr_error_get_error((const KrError*)&(obj))                 \
+)
 
 #endif //KREST_H
 
 #ifdef KREST_IMPLEMENTATION
 
 // Implementations
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
 
-void kr_free_string_ptr(KrString* s) { if(s->_data) kr_free_string(s); }
-void kr_free_vector_ptr(KrVector* v) { if (v->_data) kr_free_vector(v); }
-
-#define autofree_krstring __attribute__((cleanup(kr_free_string_ptr)))
-#define autofree_krvector __attribute__((cleanup(kr_free_vector_ptr)))
+void _kr_free_string_ptr(KrString* s) { if(s->_data && s->_size != SIZE_MAX) kr_free_string(s); }
+void _kr_free_vector_ptr(KrVector* v) { if (v->_data && v->_size != SIZE_MAX) kr_free_vector(v); }
 
 __attribute__((constructor))
 void _kr_auto_init() {
 
+    // We are not doing embeded here
     static_assert(sizeof(size_t) <= 8 && "Krest only supports 64-bit systems!");
 
 }
 
-bool kr_update_string_capacity(KrString* str) {
+// These functions are examples of Impossible Sentinel Values + Data Multiplexing
+// SIZE_MAX = 18,446,744,073,709,551,615 in 64-bit systems which explains _kr_auto_init function above
+// It's always a bigger value then there is memory addresses in the computer saying its astronomicaly large would be an
+// understatement SIZE_MAX is the known universe of numbers inside computers we then put the error_code somewhere in
+// the struct we are already going to return anyway which is the multiplexing partthat's why it's called a zero-cost
+// abstraction but since its complicated I handle it inside the library and use _Generic macro to dispatch/paste
+// according to the type passed as argument by the C Preprocessor at compile-time
+inline KrSlicePos _kr_return_err_splice_pos(const KrError error_code) {
+
+    return (KrSlicePos) {
+
+        ._start = SIZE_MAX,
+        ._end = (size_t)error_code
+
+    };
+
+}
+
+inline KrString _kr_return_err_string(char* data_ptr, const KrError error_code) {
+
+    if (data_ptr != (char*)SIZE_MAX) { free(data_ptr); }
+
+    return (KrString) {
+
+        ._size = SIZE_MAX,
+        ._capacity = 0,
+        ._data = (char*)error_code
+
+    };
+
+}
+
+inline KrStringView _kr_return_err_string_view(const KrError error_code) {
+
+    return (KrStringView) {
+
+        ._size = SIZE_MAX,
+        ._data = (char*)error_code
+
+    };
+
+}
+
+inline KrVector _kr_return_err_vector(char* data_ptr, const KrError error_code) {
+
+    if (data_ptr != (char*)SIZE_MAX) { free(data_ptr); }
+
+    return (KrVector) {
+
+        ._size = SIZE_MAX,
+        ._capacity = 0,
+        ._type_size = 1,    // To avoid division by zero errors or maybe I should let the user fail I am not sure
+        ._data = (void*)error_code
+
+    };
+
+}
+
+bool _kr_update_string_capacity(KrString* str) {
 
     // Error handling
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_update_string_capacity): Input KrString is a nullptr pointer.\n");
-        return false;
-    }
+    if (!str) { return false; }
 
     // Just in case
     if (str->_capacity == 0) { str->_capacity = DEFAULT_STRING_CAPACITY; }
@@ -183,10 +288,7 @@ bool kr_update_string_capacity(KrString* str) {
         // realloc is smart enough to act like malloc when user inputs nullptr to the first argument
         // whole functions banks on it when it comes to empty strings or user inputting nullptr
         char* new_mem = realloc(str->_data, new_capacity);
-        if (new_mem == nullptr) {
-            fprintf(stderr, "Krest Error (kr_update_string_capacity): Failed to reallocate memory for KrString object.\n");
-            return false;
-        }
+        if (new_mem == nullptr) { return false; }
 
         // Else
         str->_capacity = new_capacity;
@@ -198,29 +300,34 @@ bool kr_update_string_capacity(KrString* str) {
 
 }
 
-void kr_minimize_string_capacity(KrString* str) {
+inline bool _kr_check_replace_helper(const KrString* str, const char src[], const char with[]) {
+
+    if (!str || !src || !with || strlen(src) > str->_size) { return false; }
+
+    return true;
+
+}
+
+bool kr_minimize_string_capacity(KrString* str) {
 
     const size_t used_capacity = str->_size + NULL_TERMINATOR_LEN;
     if (str->_capacity > used_capacity) {
 
         char* new_mem = realloc(str->_data, used_capacity);
-        if (!new_mem) {
-            fprintf(stderr, "Krest Error (kr_minimize_string_capacity): Failed to shrink str.\n");
-            return;
-        }
+        if (!new_mem) { return false; }
 
         str->_capacity = used_capacity;
         str->_data = new_mem;
 
     }
 
+    return true;
+
 }
 
 KrString kr_new_string(const char src[]) {
 
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_new_string): src is a nullptr pointer.\n");
-    }
+    if (!src) { return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
 
     // Create new KrString object
     KrString s = {0};
@@ -228,14 +335,16 @@ KrString kr_new_string(const char src[]) {
     // Initialise
     s._size = strlen(src);
 
-    if (s._size + NULL_TERMINATOR_LEN >= DEFAULT_STRING_CAPACITY) {
-        s._capacity = s._size + DEFAULT_STRING_CAPACITY;
-    }
-    else {
-        s._capacity = DEFAULT_STRING_CAPACITY;
-    }
+    if (s._size + NULL_TERMINATOR_LEN >= DEFAULT_STRING_CAPACITY) { s._capacity = s._size + DEFAULT_STRING_CAPACITY; }
+    else { s._capacity = DEFAULT_STRING_CAPACITY; }
 
-    s._data = malloc(s._capacity);
+    char* new_data = malloc(s._capacity);
+    if (!new_data) {
+        free(new_data);
+        return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_MALLOC_FAIL);
+    }
+    // Else
+    s._data = new_data;
 
     // _data transfer
     memcpy(s._data, src, s._size + NULL_TERMINATOR_LEN);
@@ -248,7 +357,15 @@ KrVector kr_new_vector(size_t _type_size) {
 
     KrVector vector;
     vector._capacity = DEFAULT_VECTOR_CAPACITY;
-    vector._data = malloc(_type_size * vector._capacity);
+
+    void* new_data = malloc(_type_size * vector._capacity);
+    if (!new_data) {
+        free(new_data);
+        return _kr_return_err_vector((char*)SIZE_MAX, KR_ERR_MALLOC_FAIL);
+    }
+    // Else
+    vector._data = new_data;
+
     vector._type_size = _type_size;
     vector._size = 0;
 
@@ -256,41 +373,35 @@ KrVector kr_new_vector(size_t _type_size) {
 
 }
 
-void kr_append_string(KrString* dst, const char src[]) {
+KrError kr_append_string(KrString* dst, const char src[]) {
 
-    if (!dst) {
-        fprintf(stderr, "Krest Error (kr_append_string): dst is a nullptr pointer.\n");
-        return;
-    }
-
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_append_string): src is a nullptr pointer.\n");
-        return;
-    }
+    if (!dst || !src) { return KR_ERR_NULL_INPUT; }
 
     // Calculate new _size and update dst's _capacity accordingly
     const size_t old_size = dst->_size;
     const size_t src_len = strlen(src);
     dst->_size = dst->_size + src_len;
-    if (!kr_update_string_capacity(dst)) {
+    if (!_kr_update_string_capacity(dst)) {
 
         // By doing this I avoid zombie state if realloc fails we reset the state before return since this function
         // does mutation
         dst->_size = old_size;
-        fprintf(stderr, "Krest Error (kr_append_string): Failed to reallocate memory for dst.\n");
-        return;
+        return KR_ERR_REALLOC_FAIL;
 
     }
 
     // Appending
     memcpy(&dst->_data[old_size], src, src_len + NULL_TERMINATOR_LEN);
 
+    return KR_SUCCESS;
+
 }
 
-void kr_reverse_bytes(uint8_t* src, size_t size) {
+KrError kr_reverse_bytes(uint8_t* src, size_t size) {
     // Nothing to reverse
-    if (size < 2) return;
+    if (size < 2) { return KR_ERR_SMALL_INPUT; }
 
+    // Notice the type uint8_t* it's a pointer to a char/uint8_t I use it to peek at bytes, it's load-agnostic logic
     uint8_t* front = src;
     uint8_t* back = src + size - 1;
     uint8_t  temp = 0;
@@ -307,28 +418,19 @@ void kr_reverse_bytes(uint8_t* src, size_t size) {
 
     }
 
+    return KR_SUCCESS;
+
 }
 
-void kr_append_to_vector(KrVector* dst, const void* src) {
+KrError kr_append_to_vector(KrVector* dst, const void* src) {
 
-    if (!dst) {
-        fprintf(stderr, "Krest Error (kr_append_to_vector): dst is a nullptr pointer.");
-        return;
-    }
-
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_append_to_vector): src is a nullptr pointer.");
-        return;
-    }
+    if (!dst || !src) { return KR_ERR_NULL_INPUT; }
 
     if (dst->_size + 1 >= dst->_capacity) {
 
         dst->_capacity *= 2;
         void* new_data = realloc(dst->_data, dst->_capacity * dst->_type_size);
-        if (!new_data) {
-            fprintf(stderr, "Krest Error (kr_append_to_vector): Failed to reallocate dst->_size.\n");
-            return;
-        }
+        if (!new_data) { return KR_ERR_REALLOC_FAIL; }
         // Else
         dst->_data = new_data;
 
@@ -338,6 +440,8 @@ void kr_append_to_vector(KrVector* dst, const void* src) {
     memcpy(&dst->_data[dst->_size * dst->_type_size], src, dst->_type_size);
     dst->_size += 1;
 
+    return KR_SUCCESS;
+
 }
 
 void* kr_get_vector_element(const KrVector* src, size_t index) {
@@ -346,114 +450,66 @@ void* kr_get_vector_element(const KrVector* src, size_t index) {
 
 }
 
-void kr_insert_char(KrString* dst, char src, size_t index) {
+KrError kr_insert_char(KrString* dst, char src, size_t index) {
 
-    if (!dst) {
-        fprintf(stderr, "Krest Error (kr_insert_char): dst is a nullptr pointer.\n");
-        return;
-    }
-
-    if (index >= dst->_size) {
-        fprintf(stderr, "Krest Error (kr_insert_char): Index cannot be bigger than or equal to input string _size.\n");
-        return;
-    }
+    if (!dst) { return KR_ERR_NULL_INPUT; }
+    if (index >= dst->_size) { return KR_ERR_INDEX_OOB; }
 
     // Calculate new _size and update _capacity
     const size_t old_size = dst->_size;
     dst->_size = dst->_size + sizeof(src);
-    if (!kr_update_string_capacity(dst)) {
-        dst->_size = old_size;
-        fprintf(stderr, "Krest Error (kr_insert_char): Failed to reallocate memory for dst.\n");
-        return;
-    }
+    if (!_kr_update_string_capacity(dst)) { return KR_ERR_REALLOC_FAIL; }
 
     // 1 here means start moving into after the insert gap, do not move what will be inserted char
-    memmove(&dst->_data[index] + 1, &dst->_data[index], old_size - index + NULL_TERMINATOR_LEN);
+    memmove(&dst->_data[index] + 1, &dst->_data[index], old_size - index);
 
     // Insertion
     // +1 here is needed since we change the _size old index points to a different place than it used to
     // amount of increment to index is equal to how far away we moved the memory after index which is +1
     // as reader can see above in the first argument of the memmove
-    index += 1;
     dst->_data[index] = src;
     dst->_data[dst->_size] = '\0';
 
+    return KR_SUCCESS;
+
 }
 
-void kr_insert_string(KrString* dst, const char src[], size_t index) {
+KrError kr_insert_string(KrString* dst, const char src[], size_t index) {
 
-    if (!dst) {
-        fprintf(stderr, "Krest Error (kr_insert_char): dst is a nullptr pointer.\n");
-        return;
-    }
+    if (!dst || !src) { return KR_ERR_NULL_INPUT; }
 
-    if (index >= dst->_size) {
-        fprintf(stderr, "Krest Error (kr_insert_char): Index cannot be bigger than or equal to input string _size.\n");
-        return;
-    }
+    if (index >= dst->_size) { return KR_ERR_INDEX_OOB; }
+
+    const size_t src_len = strlen(src);
+    if (src_len == 0) { return KR_ERR_SMALL_INPUT; }
 
     // Calculate new _size and update _capacity
     const size_t old_size = dst->_size;
-    const size_t src_len = strlen(src);
     dst->_size = dst->_size + src_len;
-    if (!kr_update_string_capacity(dst)) {
-        dst->_size = old_size;
-        fprintf(stderr, "Krest Error (kr_insert_char): Failed to reallocate memory for dst.\n");
-        return;
-    }
+    if (!_kr_update_string_capacity(dst)) { return KR_ERR_REALLOC_FAIL; }
 
-    // Notice we don't do +1 like we did with kr_insert_char because src_len is a cardinal value it starts from 1
-    memmove(&dst->_data[index] + src_len, &dst->_data[index], old_size - index + NULL_TERMINATOR_LEN);
+    // Create gap
+    memmove(&dst->_data[index + src_len], &dst->_data[index], old_size - index);
 
     // Insertion
-    // +src_len here is needed since we change the _size old index points to a different place than it used to
-    // amount of increment to index is equal to how far away we moved the memory after index which is +src_len
-    // as reader can see above in the first argument of the memmove
-    index += src_len;
-    memcpy(&dst->_data[index], src, src_len + NULL_TERMINATOR_LEN);
+    memcpy(&dst->_data[index], src, src_len);
     dst->_data[dst->_size] = '\0';
+
+    return KR_SUCCESS;
 
 }
 
-KrString kr_slice_string(const KrString* src, size_t start, size_t end) {
+KrStringView kr_slice_string(const KrString* src, size_t index, size_t size) {
 
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_slice_string): src parameter is a nullptr pointer.\n");
-    }
+    if (!src) { return _kr_return_err_string_view(KR_ERR_NULL_INPUT); }
 
-    if (end > src->_size) {
-        fprintf(stderr, "Krest Error (kr_slice_string): end cannot be bigger than src _size.\n");
-    }
-
-    if (start > end) {
-        fprintf(stderr, "Krest Error (kr_slice_string): start cannot be bigger than end.\n");
-    }
-
-    KrString s = kr_new_string("");
-    s._size = end - start;
-    if (!kr_update_string_capacity(&s)) {
-        kr_free_string(&s);
-        fprintf(stderr, "Krest Error (kr_slice_string): Failed to reallocate memory for KrString object.\n");
-    }
-
-    memcpy(s._data, &src->_data[start], s._size);
-    s._data[s._size] = '\0';
-
-    return s;
+    return (KrStringView) { ._data = &src->_data[index], ._size = size };
 
 }
 
 bool kr_is_empty_string(const KrString* str) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_is_empty_string): str is a nullptr pointer.\n");
-        return false;
-    }
-
-    if (!str->_data) {
-        fprintf(stderr, "Krest Error (kr_is_empty_string): str->_data is a nullptr pointer.\n");
-        return false;
-    }
+    if (!str || !str->_data) { return false; }
 
     if (str->_data[0] == '\0') { return true; }
     // Else if not empty
@@ -461,28 +517,35 @@ bool kr_is_empty_string(const KrString* str) {
 
 }
 
+bool kr_is_string_all_whitespace(const KrString* str) {
+
+    if (!str) { return false; }
+    if (kr_is_empty_string(str)) { return false; }
+
+    for (size_t i = 0; i < str->_size; i++) {
+
+        if (str->_data[i] != ' ') { return false; }
+
+    }
+
+    return true;
+
+}
+
 KrSlicePos kr_find_substring(const KrString* str, const char src[]) {
 
-    KrSlicePos pos = { 0, 0, 0 };
+    KrSlicePos pos = { 0, 0, };
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_find_substring): str is a nullptr pointer.\n");
-        return pos;
-    }
+    if (!str || !src || kr_is_error(*str)) { return _kr_return_err_splice_pos(KR_ERR_NULL_INPUT); }
 
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_find_substring): src is a nullptr pointer.\n");
-        return pos;
-    }
+    if (strlen(src) > str->_size) { return _kr_return_err_splice_pos(KR_ERR_INDEX_OOB); }
 
-    if (strlen(src) > str->_size) {
-        fprintf(stderr, "Krest Error (kr_find_substring): src cannot be bigger than str.\n");
-        return pos;
-    }
+    const size_t src_size = strlen(src);
+    if (src_size == 0) { return _kr_return_err_splice_pos(KR_ERR_SMALL_INPUT); }
 
     // Number of iterations = main string length - substring length
     // Sliding window implementation
-    const size_t src_size = strlen(src);
+    bool found = false;
     for (size_t i = 0; i <= str->_size - src_size; i++) {
 
         if (memcmp(&str->_data[i], src, src_size) == 0) {
@@ -490,84 +553,61 @@ KrSlicePos kr_find_substring(const KrString* str, const char src[]) {
             // -1 is a convertion from string length to array index value
             pos._start = i;
             pos._end = src_size + i - 1;
-            pos._success = true;
+            found = true;
             break;
 
         }
 
     }
 
+    if (!found) { return _kr_return_err_splice_pos(KR_ERR_NOT_FOUND); }
+
     return pos;
 
 }
 
-bool kr_check_replace_helper(const KrString* str, const char src[], const char with[]) {
+KrError kr_replace_first_substring(KrString* str, const char src[], const char with[]) {
 
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_replace_substring): src is a nullptr pointer.\n");
-        return false;
-    }
-
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_replace_substring): str is a nullptr pointer.\n");
-        return false;
-    }
-
-    if (!with) {
-        fprintf(stderr, "Krest Error (kr_replace_substring): with is a nullptr pointer.\n");
-        return false;
-    }
-
-    if (strlen(src) > str->_size) {
-        fprintf(stderr, "Krest Error (kr_replace_string): src cannot be longer than str->_data.\n");
-        return false;
-    }
-
-    return true;
-
-}
-
-void kr_replace_first_substring(KrString* str, const char src[], const char with[]) {
-
-    if (!kr_check_replace_helper(str, src, with)) return;
+    if (!_kr_check_replace_helper(str, src, with)) { return KR_ERR_NULL_INPUT; }
 
     const KrSlicePos pos = kr_find_substring(str, src);
-    if (!pos._success) {
-        fprintf(stderr, "Krest Error (kr_replace_substring): Failed to find src in str.\n");
-        return;
-    }
+    if (kr_is_error(pos)) { return KR_ERR_NOT_FOUND; }
 
     const ssize_t diff = (ssize_t)strlen(with) - (ssize_t)strlen(src);
     if (diff >= 0) {
 
         str->_size += diff;
-        if (!kr_update_string_capacity(str)) {
-            fprintf(stderr, "Krest Error (kr_replace_substring): Failed to resize str.\n");
-            return;
-        }
+        if (!_kr_update_string_capacity(str)) { return KR_ERR_REALLOC_FAIL; }
 
     }
 
     // Calculating how much and what to move
     // +1 here is present because pos.end is exclusive
     char* tail = &str->_data[pos._end + 1];
-    size_t bytes_to_move = strlen(tail) + NULL_TERMINATOR_LEN;
+    const size_t bytes_to_move = strlen(tail) + NULL_TERMINATOR_LEN;
 
     // We don't need to use memmove if there is nothing to move meaning the gap is where it needs to be
     if (diff != 0) memmove(tail + diff, tail, bytes_to_move);
     memcpy(&str->_data[pos._start], with, strlen(with));
 
+    return KR_SUCCESS;
+
 }
 
 KrVector kr_find_all_substrings(const KrString* str, const char src[]) {
 
+    if (!str || !src || kr_is_error(*str)) { return _kr_return_err_vector((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
+
     // Positions array
     KrVector positions = kr_new_vector(sizeof(KrSlicePos));
 
+    const size_t src_len = strlen(src);
+    if (src_len == 0) { return _kr_return_err_vector(positions._data, KR_ERR_SMALL_INPUT); }
+
     // Sliding window implementation and occurrence storing
-    size_t src_len = strlen(src);
-    size_t step_amount = str->_size - src_len;
-    KrSlicePos pos = { 0, 0, 0 };
+    const size_t step_amount = str->_size - src_len;
+    KrSlicePos pos = { 0, 0 };
+    bool found = false;
     for (size_t i = 0; i <= step_amount; i++) {
 
         // Start from ith offset go as long as length of src and compare with src, 0 means no difference has been found
@@ -576,24 +616,31 @@ KrVector kr_find_all_substrings(const KrString* str, const char src[]) {
             // -1 means pos.end includes the char after the end for some reason I don't know why
             pos._start = i;
             pos._end = src_len + i - 1;
-            pos._success = true;
 
-            kr_append_to_vector(&positions, &pos);
+            KrError ret = kr_append_to_vector(&positions, &pos);
+            if (kr_is_error(ret)) { printf("Cought append error!\n"); exit(0); }
+
+            found = true;
 
         }
 
     }
 
+    if (!found) { return _kr_return_err_vector(positions._data, KR_ERR_NOT_FOUND); }
+
     return positions;
 
 }
 
-void kr_replace_all_substrings(KrString* str, const char src[], const char with[]) {
+KrError kr_replace_all_substrings(KrString* str, const char src[], const char with[]) {
 
-    if (!kr_check_replace_helper(str, src, with)) return;
+    if (!_kr_check_replace_helper(str, src, with)) { return KR_ERR_NULL_INPUT; }
 
     // Positions array
     autofree_krvector const KrVector positions = kr_find_all_substrings(str, src);
+    if (kr_is_error(positions)) { return KR_ERR_NOT_FOUND; }
+
+    if (positions._size == SIZE_MAX) { return KR_ERR_NOT_FOUND; }
 
     // Length of src
     const size_t src_len = strlen(src);
@@ -602,10 +649,15 @@ void kr_replace_all_substrings(KrString* str, const char src[], const char with[
     const ssize_t diff_per_occurrence = (ssize_t)strlen(with) - (ssize_t)src_len;
     const ssize_t cum_diff_of_changes = diff_per_occurrence * (ssize_t)positions._size;
     const size_t final_size = str->_size + cum_diff_of_changes;
+
     char* new_buffer = malloc(final_size  + NULL_TERMINATOR_LEN * sizeof(char));
+    if (!new_buffer) {
+        free(new_buffer);
+        return KR_ERR_MALLOC_FAIL;
+    }
     new_buffer[final_size] = '\0';
 
-    // Filling new_buffer
+    // Filling new_buffer with double-pointer technique
     size_t nb_cursor = 0;
     size_t str_cursor = 0;
     size_t gap_len = 0;
@@ -628,169 +680,128 @@ void kr_replace_all_substrings(KrString* str, const char src[], const char with[
 
     }
 
+    // This is needed because we iterate over positions found that leaves the tail from the last pos in the old buffer
     const size_t tail_len = str->_size - str_cursor;
     if (tail_len > 0) {
 
         memcpy(&new_buffer[nb_cursor], &str->_data[str_cursor], tail_len);
+        nb_cursor += tail_len;
 
     }
 
     // Binding new_buffer to str
     str->_size = final_size;
-    str->_capacity = final_size + NULL_TERMINATOR_LEN;
+    str->_capacity = final_size + DEFAULT_STRING_CAPACITY + NULL_TERMINATOR_LEN;
     free(str->_data);
     str->_data = new_buffer;
 
+    return KR_SUCCESS;
+
 }
 
-void kr_replace_char(KrString* str, char with, size_t index) {
+KrError kr_replace_char(KrString* str, char with, size_t index) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_replace_char): str is a nullptr pointer.\n");
-        return;
-    }
+    if (!str) { return KR_ERR_NULL_INPUT; }
 
-    if (index >= str->_size) {
-        fprintf(stderr, "Krest Error (kr_replace_char): index is out of str's range.\n");
-        return;
-    }
+    if (index >= str->_size) { return KR_ERR_INDEX_OOB; }
 
     str->_data[index] = with;
 
-}
-
-char kr_string_starts_with(const KrString* str) {
-
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_string_starts_with): str is a nullptr pointer.\n");
-    }
-
-    return str->_data[0];
+    return KR_SUCCESS;
 
 }
 
-char kr_string_ends_with(const KrString* str) {
+KrError kr_set_string_data(KrString* str, const char data[]) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_string_ends_with): str is a nullptr pointer.\n");
-    }
-
-    return str->_data[str->_size - 1];
-
-}
-
-void kr_set_string_data(KrString* str, const char _data[]) {
-
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_set_string_data): str is a nullptr pointer.\n");
-        return;
-    }
-
-    if (!_data) {
-        fprintf(stderr, "Krest Error (kr_set_string_data): _data is a nullptr pointer.\n");
-        return;
-    }
+    if (!str || !data) { return KR_ERR_NULL_INPUT; }
 
     const size_t old_len = str->_size;
-    str->_size = strlen(_data);
-    if (!kr_update_string_capacity(str)) {
+    str->_size = strlen(data);
+    if (!_kr_update_string_capacity(str)) {
         str->_size = old_len;
-        fprintf(stderr, "Krest Error (kr_set_string_data): Failed to resize str.\n");
-        return;
+        return KR_ERR_REALLOC_FAIL;
     }
 
-    memcpy(str->_data, _data, str->_size);
+    memcpy(str->_data, data, str->_size + NULL_TERMINATOR_LEN);
+
+    return KR_SUCCESS;
 
 }
 
-void kr_split_string(KrString* str1, KrString* str2, size_t index) {
+KrError kr_split_string(KrString* str1, KrString* str2, size_t index) {
 
-    if (!str1) {
-        fprintf(stderr, "Krest Error (kr_split_string): str1 is a nullptr pointer.\n");
-        return;
-    }
-
-    if (!str2) {
-        fprintf(stderr, "Krest Error (kr_split_string): str2 is a nullptr pointer.\n");
-        return;
-    }
+    if (!str1 || !str2) { return KR_ERR_NULL_INPUT; }
+    if (index >= str1->_size) { return KR_ERR_INDEX_OOB; }
 
     // Filling str2
-    const size_t right_hand_size = str1->_size - index - 1;
+    const size_t right_hand_size = str1->_size - index;
     const size_t old_len = str2->_size;
     str2->_size = right_hand_size;
-    if (!kr_update_string_capacity(str2)) {
+    if (!_kr_update_string_capacity(str2)) {
         str2->_size = old_len;
-        fprintf(stderr, "Krest Error (kr_split_string): Failed to resize str2.\n");
-        return;
+        return KR_ERR_REALLOC_FAIL;
     }
 
     memcpy(str2->_data, &str1->_data[index], right_hand_size);
+    str2->_size = right_hand_size;
     str2->_data[right_hand_size] = '\0';
 
     // Clipping str1
     const size_t left_hand_size = str1->_size - right_hand_size;
+    str1->_size = left_hand_size;
     str1->_data[left_hand_size] = '\0';
+
+    return KR_SUCCESS;
 
 }
 
-void kr_preallocate_string(KrString* str, size_t capacity) {
+KrError kr_preallocate_string(KrString* str, size_t capacity) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_preallocate_string): str is a nullptr pointer.\n");
-        return;
-    }
+    if (!str) { return KR_ERR_NULL_INPUT; }
 
     // No need to reallocate
-    if (capacity <= str->_capacity) return;
+    if (capacity <= str->_capacity) { return KR_ERR_SMALL_INPUT; }
 
     // Resize
     const size_t old_capacity = capacity;
     char* new_mem = realloc(str->_data, capacity);
     if (new_mem == nullptr) {
         str->_capacity = old_capacity;
-        fprintf(stderr, "Krest Error (kr_update_string_capacity): Failed to reallocate memory for KrString object.\n");
-        return;
+        return KR_ERR_REALLOC_FAIL;
     }
 
     // Else
     str->_capacity = capacity;
     str->_data = new_mem;
 
+    return KR_SUCCESS;
+
 }
 
-void kr_preallocate_vector(KrVector* vector, size_t size_mb) {
+KrError kr_preallocate_vector(KrVector* vector, size_t size_byte) {
 
-    if (!vector) {
-        fprintf(stderr, "Krest Error (kr_preallocate_vector): vector is a nullptr pointer.\n");
-        return;
-    }
+    if (!vector) { return KR_ERR_NULL_INPUT; }
 
     // No need to reallocate
-    if (size_mb <= vector->_capacity) return;
+    if (size_byte <= vector->_capacity) { return KR_ERR_SMALL_INPUT; }
 
-    vector->_capacity = size_mb;
+    const size_t old_capacity = vector->_capacity;
+    vector->_capacity = size_byte;
     void* new_data = realloc(vector->_data, vector->_capacity * vector->_type_size);
     if (!new_data) {
-        fprintf(stderr, "Krest Error (kr_preallocate_vector): Failed to reallocate dst->_size.\n");
-        return;
+        vector->_capacity = old_capacity;
+        return KR_ERR_REALLOC_FAIL;
     }
     // Else
     vector->_data = new_data;
+
+    return KR_SUCCESS;
 
 }
 
 bool kr_is_equal_string(const KrString* str1, const KrString* str2) {
 
-    if (!str1) {
-        fprintf(stderr, "Krest Error (kr_is_equal_string): str1 is a nullptr pointer.\n");
-        return false;
-    }
-
-    if (!str2) {
-        fprintf(stderr, "Krest Error (kr_is_equal_string): str2 is a nullptr pointer.\n");
-        return false;
-    }
+    if (!str1 || !str2) { return false; }
 
     if (str1->_size != str2->_size) { return false; }
     if (memcmp(str1->_data, str2->_data, str1->_size) != 0) { return false; }
@@ -799,51 +810,67 @@ bool kr_is_equal_string(const KrString* str1, const KrString* str2) {
 
 }
 
-KrString kr_copy_string(const KrString* str) {
+KrString kr_shallow_copy_string(const KrString* str) {
 
-    return kr_new_string(str->_data);
+    if (!str) { return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
+
+    const KrString s = { ._capacity = str->_capacity, ._data = str->_data, ._size = str->_size };
+    return s;
 
 }
 
-void kr_string_pop_back(KrString* str) {
+KrString kr_deep_copy_string(const KrString* str) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_string_pop_back): str is nullptr pointer.\n");
-        return;
-    }
+    if (!str) { return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
 
-    if (str->_size == 0) return;
+    KrString s = kr_new_string(str->_data);
+    s._capacity = str->_capacity;
+    s._size = str->_size;
+
+    return s;
+
+}
+
+KrError kr_string_pop_back(KrString* str) {
+
+    if (!str) { return KR_ERR_NULL_INPUT; }
+
+    if (str->_size == 0) { return KR_ERR_SMALL_INPUT; }
 
     // -1 here is a convertion from size_t into an index value, last element to be precise
     str->_data[str->_size - 1] = '\0';
     str->_size -= 1;
 
+    return KR_SUCCESS;
+
 }
 
-void kr_string_pop(KrString* str) {
+KrError kr_string_pop(KrString* str) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_string_pop): str is nullptr pointer.\n");
-        return;
-    }
+    if (!str) { return KR_ERR_NULL_INPUT; }
 
-    if (str->_size == 0) return;
+    if (str->_size == 0) { return KR_ERR_SMALL_INPUT; }
 
     str->_size -= 1;
     memmove(str->_data, &str->_data[1], str->_size);
     str->_data[str->_size] = '\0';
 
+    return KR_SUCCESS;
+
 }
 
-void kr_trim_string(KrString* src) {
+KrError kr_trim_string(KrString* src) {
 
-    if (!src) {
-        fprintf(stderr, "Krest Error (kr_trim_string): src is a nullptr pointer.");
-        return;
-    }
+    if (!src) { return KR_ERR_NULL_INPUT; }
 
-    // If all whitespaces nothing to trim
-    if (src->_size == 0) return;
+    // Edge-case: If all whitespaces
+    if (kr_is_string_all_whitespace(src)) {
+
+        src->_size = 0;
+        src->_data[0] = '\0';
+        return KR_SUCCESS;
+
+   }
 
     // Trim front
     for (size_t i = 0; i < src->_size; i++) {
@@ -859,14 +886,14 @@ void kr_trim_string(KrString* src) {
 
     }
 
-    // If the string is all whitespaces it is trimmed
-    if (src->_size == 0) return;
+    // If the string is all whitespaces and it is sucessfully trimmed
+    if (src->_size == 0) return KR_SUCCESS;
 
     // Trim back
     // +1 and -1 here are conversions from nth element to index array values and back
     // accessing _data requires starting from 0 where _size starts from 1
     // This is often called cardinal (how many items) and ordinal (which one, index number)
-    if (src->_data[src->_size - 1] != ' ') return;
+    if (src->_data[src->_size - 1] != ' ') return KR_SUCCESS;
     for (size_t i = src->_size - 1; i > 0; i--) {
 
         if (src->_data[i] != ' ') {
@@ -879,39 +906,29 @@ void kr_trim_string(KrString* src) {
 
     }
 
+    return KR_SUCCESS;
+
 }
 
-void kr_free_vector(KrVector* vector) {
+KrError kr_free_vector(KrVector* vector) {
 
-    if (!vector) {
-        fprintf(stderr, "Krest Error (kr_free_vector): vector is a nullptr pointer.");
-        return;
-    }
-
-    if (!vector->_data) {
-        fprintf(stderr, "Krest Error (kr_free_vector): vector->_data is a nullptr pointer, you might've double freed this object.");
-        return;
-    }
+    if (!vector || !vector->_data) { return KR_ERR_NULL_INPUT; }
 
     free(vector->_data);
     vector->_data = nullptr;
 
+    return KR_SUCCESS;
+
 }
 
-void kr_free_string(KrString* str) {
+KrError kr_free_string(KrString* str) {
 
-    if (!str) {
-        fprintf(stderr, "Krest Error (kr_free_string): str is a nullptr pointer.\n");
-        return;
-    }
-
-    if (!str->_data) {
-        fprintf(stderr, "Krest Error (kr_free_string): str->_data is a nullptr pointer, you might've double freed this object.\n");
-        return;
-    }
+    if (!str || !str->_data) { return KR_ERR_NULL_INPUT; }
 
     free(str->_data);
     str->_data = nullptr;
+
+    return KR_SUCCESS;
 
 }
 
