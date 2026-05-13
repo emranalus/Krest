@@ -1,420 +1,477 @@
 #ifndef KREST_H
 #define KREST_H
 
-// Definitions
-#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
 
-#define DEFAULT_STRING_CAPACITY 32
-#define DEFAULT_VECTOR_CAPACITY 16
-#define NULL_TERMINATOR_LEN 1
+// General constants
+constexpr int8_t KR_POINTER_SIZE_B = sizeof(void*);
 
-#define autofree_krstring __attribute__((cleanup(_kr_free_string_ptr)))
-#define autofree_krvector __attribute__((cleanup(_kr_free_vector_ptr)))
+// Stack constants
+constexpr int16_t DEFAULT_STACK_CAPACITY_S = 128;
+constexpr int8_t STACK_HEADER_SIZE_B = 16;
+constexpr int8_t STACK_HEADER_SIZE_S = 2;
+constexpr int8_t DEFAULT_STACK_SIZE_S = 0;
+constexpr int8_t GET_STACK_SIZE_INDEX = -1;
+constexpr int8_t GET_STACK_CAPACITY_INDEX = -2;
 
-// Array list type string object with _size, _capacity and _data fields
-typedef struct {
+// Queue constants
+constexpr int16_t DEFAULT_QUEUE_CAPACITY_S = 128;
+constexpr int8_t QUEUE_HEADER_SIZE_B = 32;
+constexpr int8_t QUEUE_HEADER_SIZE_S = 4;
+constexpr int8_t DEFAULT_QUEUE_SIZE_S = 0;
+constexpr int8_t DEFAULT_QUEUE_HEAD_S = 0;
+constexpr int8_t DEFAULT_QUEUE_TAIL_S = 0;
+constexpr int8_t GET_QUEUE_TAIL_INDEX = -1;
+constexpr int8_t GET_QUEUE_HEAD_INDEX = -2;
+constexpr int8_t GET_QUEUE_SIZE_INDEX = -3;
+constexpr int8_t GET_QUEUE_CAPACITY_INDEX = -4;
 
-    size_t _size;        // Metadata, _size of string
-    size_t _capacity;    // Metadata, _size of allocated memory
-    char* _data;         // Array, start of string
+// Deque constants
+constexpr int16_t KR_DEFAULT_DEQUE_BLOCK_SIZE_S = 128;
+constexpr int8_t KR_DEQUE_HEADER_SIZE_S = 6;
+constexpr int8_t KR_DEFAULT_DEQUE_MAP_CAP_S = 16;
+constexpr int8_t KR_DEFAULT_DEQUE_MAP_SIZE_S = 0;
+constexpr int8_t KR_DEFAULT_DEQUE_SIZE_S = 0;
+constexpr int16_t KR_DEFAULT_DEQUE_HEAD_INDEX = 0;
+constexpr int16_t KR_DEFAULT_DEQUE_TAIL_INDEX = 0;
 
-} KrString;
+// Error and error handling constants
+constexpr int8_t MAX_ERROR_CODE_AMOUNT = 100;
+constexpr int8_t MAX_ATTEMPT = 5;
 
-// Return type containing start and end indices for string objects
-typedef struct {
+typedef uint8_t KrByte;
 
-    size_t _start;
-    size_t _end;
-
-} KrSlicePos;
-
-// View object for KrString that doesnt own it just peeks into it
-typedef struct {
-
-    char* _data;
-    size_t _size;
-
-} KrStringView;
-
-// Array list object but dynamic due to carrying type _size it can be set to anytype this way
-typedef struct {
-
-    size_t _size;
-    size_t _capacity;
-    size_t _type_size;
-    void* _data;
-
-} KrVector;
-
-// Error codes enum
+// Errors are handled by subtracting the returned sentinel value from SIZE_MAX which gives us the enum value of the error
+// So error handling logic is Impossible Sentinel Values + Data Multiplexing for KrByte* returning functions
+// Others just return KrError, but it would be dumb to return NULL input and let you check for it again so user needs
+// to do their own null checks since that will result in the same number of ifs if not less
 typedef enum {
 
     KR_SUCCESS,
     KR_ERR_MALLOC_FAIL,
     KR_ERR_REALLOC_FAIL,
     KR_ERR_NULL_INPUT,
-    KR_ERR_INDEX_OOB,   // Out of Bound
+    KR_ERR_INDEX_OOB,     // Out of Bounds
     KR_ERR_SMALL_INPUT,
-    KR_ERR_NOT_FOUND,
-
+    KR_ERR_TYPE_MISMATCH,
+    KR_ERR_INVALID_STRATEGY,
+    KR_ERR_EMPTY,
 
 } KrError;
 
-// Updates the _capacity by reallocating memory to the _data prop of the KrString object
-bool _kr_update_string_capacity(KrString* str);
+typedef enum {
 
-// Sets string _capacity to the minimum possible value
-bool kr_minimize_string_capacity(KrString* str);
+    KR_BOOL,
+    KR_U8,
+    KR_U16,
+    KR_U32,
+    KR_U64,
+    KR_I8,
+    KR_I16,
+    KR_I32,
+    KR_I64,
+    KR_F32,
+    KR_F64,
+    KR_CHAR,
+    KR_STRING,
+    KR_VOID_PTR,
+    KR_UNKNOWN,
 
-// Returns a new KrString object, user needs to free it with kr_free_string or declare it with autofree_krstring
-KrString kr_new_string(const char src[]);
+} KrTypes;
 
-// Returns a new KrVector object, user needs to free it with kr_free_vector or declare it with autofree_krvector
-KrVector kr_new_vector(size_t _type_size);
+typedef enum {
 
-// Appends src at the end of dst
-KrError kr_append_string(KrString* dst, const char src[]);
+    KR_DO_LEFT = false,
+    KR_DO_RIGHT = true,
 
-// Reverses the order of bytes of a given buffer, starting from 0 up to _size - 1
-KrError kr_reverse_bytes(uint8_t* src, size_t _size);
+} KrBlockDirections;
 
-// Appends src at the end of dst
-KrError kr_append_to_vector(KrVector* dst, const void* src);
+// Structs
+typedef struct {
 
-// Returns a void* user can assign with any type pointer since they defined the _size of each type at vector creation
-void* kr_get_vector_element(const KrVector* src, size_t index);
+    size_t map_cap;
+    size_t map_size;
+    size_t dque_size;
+    size_t head;
+    size_t tail;
 
-// Inserts one char into string at specified index
-KrError kr_insert_char(KrString* dst, char src, size_t index);
+} KrDqueHeader;
 
-// Inserts src into string at specified index
-KrError kr_insert_string(KrString* dst, const char src[], size_t index);
+#define GET_TYPE_AS_STRING(x) _Generic((x),    \
+    bool:       "bool",                        \
+    uint8_t:    "u8/byte",                     \
+    uint16_t:   "u16",                         \
+    uint32_t:   "u32",                         \
+    uint64_t:   "u64",                         \
+    int8_t:     "i8",                          \
+    int16_t:    "i16",                         \
+    int32_t:    "i32",                         \
+    int64_t:    "i64",                         \
+    float:      "f32",                         \
+    double:     "f64",                         \
+    char:       "char/byte",                   \
+    char*:      "string",                      \
+    void*:      "void*",                       \
+    default:    "unknown"                      \
+ )
 
-// Returns a new KrSting objects containing a slice of the inputted string, excludes last char and includes first char
-KrStringView kr_slice_string(const KrString* src, size_t index, size_t size);
-
-// Returns true if KrString->_data is an empty string
-bool kr_is_empty_string(const KrString* str);
-
-// Returns true if str is not an empty string and is all whitespaces
-bool kr_is_string_all_whitespace(const KrString* str);
-
-// Rreturns a KrSlicePos object containing start and end indices
-KrSlicePos kr_find_substring(const KrString* str, const char src[]);
-
-// Returns a KrVector object containing all occurrences of the substring in the form of KrSlicePos
-KrVector kr_find_all_substrings(const KrString* str, const char src[]);
-
-// Replaces src substring with 'with' substring
-KrError kr_replace_first_substring(KrString* str, const char src[], const char with[]);
-
-// Replaces all occurrences of src with 'with' substring
-KrError kr_replace_all_substrings(KrString* str, const char src[], const char with[]);
-
-// Replaces char at index with 'with'
-KrError kr_replace_char(KrString* str, char with, size_t index);
-
-// Changes strings _data prop
-KrError kr_set_string_data(KrString* str, const char data[]);
-
-// Splits the str1 in half stores first half in str1 second half in str2, char at index is the start of str2
-KrError kr_split_string(KrString* str1, KrString* str2, size_t index);
-
-// Note: Preallocate once with enough or more _size than you think you will need
-// so KrString doesn't need to reallocate memory everytime it reaches its _capacity
-KrError kr_preallocate_string(KrString* str, size_t capacity);
-
-// Note: Preallocate once with enough or more _size than you think you will need
-// so KrVector doesn't need to reallocate memory everytime it reaches its _capacity
-KrError kr_preallocate_vector(KrVector* vector, size_t size_byte);
-
-// Returns true if strings are equal
-bool kr_is_equal_string(const KrString* str1, const KrString* str2);
-
-// Returns a KrString objects pointing to the same memory as str
-KrString kr_shallow_copy_string(const KrString* str);
-
-// Returns a newly allocated KrString object with the same _data prop
-KrString kr_deep_copy_string(const KrString* str);
-
-// Removes the last element of the string
-KrError kr_string_pop_back(KrString* str);
-
-// Removes the first element of the string
-KrError kr_string_pop(KrString* str);
-
-// Removes whitespaces at the beginning and end of the string
-KrError kr_trim_string(KrString* src);
-
-// Free KrVector object from memory
-KrError kr_free_vector(KrVector* vector);
-
-// Free KrString object from memory
-KrError kr_free_string(KrString* str);
-
-// autofree macro dispatch functions
-void _kr_free_string_ptr(KrString* s);
-void _kr_free_vector_ptr(KrVector* v);
-
-// Generic error handling macro dispatch functions for each type
-static inline bool _kr_string_is_err(const KrString* s) { return s->_size == SIZE_MAX; }
-static inline bool _kr_vector_is_err(const KrVector* v) { return v->_size == SIZE_MAX; }
-static inline bool _kr_string_view_is_err(const KrStringView* sw) { return sw->_size == SIZE_MAX; }
-static inline bool _kr_slice_pos_is_err(const KrSlicePos* sp) { return sp->_start == SIZE_MAX; }
-static inline bool _kr_error_is_err(const KrError* e) { return *e != KR_SUCCESS; }
-
-static inline KrError _kr_string_get_error(const KrString* s);
-static inline KrError _kr_vector_get_error(const KrVector* v);
-static inline KrError _kr_string_view_get_error(const KrStringView* sw);
-static inline KrError _kr_slice_pos_get_error(const KrSlicePos* sp);
-static inline KrError _kr_error_get_error(const KrError* e);
-
-#define kr_is_error(obj) _Generic((obj),                                       \
-    KrString:       _kr_string_is_err((const KrString*)&(obj)),                \
-    KrVector:       _kr_vector_is_err((const KrVector*)&(obj)),                \
-    KrStringView:   _kr_string_view_is_err((const KrStringView*)&(obj)),       \
-    KrSlicePos:     _kr_slice_pos_is_err((const KrSlicePos*)&(obj)),           \
-    KrError:        _kr_error_is_err((const KrError*)&(obj))                   \
+#define GET_TYPE_AS_ENUM(x) _Generic((x),      \
+    bool:       KR_BOOL,                       \
+    uint8_t:    KR_U8,                         \
+    uint16_t:   KR_U16,                        \
+    uint32_t:   KR_U32,                        \
+    uint64_t:   KR_U64,                        \
+    int8_t:     KR_I8,                         \
+    int16_t:    KR_I16,                        \
+    int32_t:    KR_I32,                        \
+    int64_t:    KR_I64,                        \
+    float:      KR_F32,                        \
+    double:     KR_F64,                        \
+    char:       KR_CHAR,                       \
+    char*:      KR_STRING,                     \
+    void*:      KR_VOID_PTR,                   \
+    default:    KR_UNKNOWN                     \
 )
 
-static inline KrError _kr_string_get_error(const KrString* s) { return (KrError)(uintptr_t)s->_data; }
-static inline KrError _kr_vector_get_error(const KrVector* v) { return (KrError)(uintptr_t)v->_data; }
-static inline KrError _kr_string_view_get_error(const KrStringView* sw) { return (KrError)(uintptr_t)sw->_data; }
-static inline KrError _kr_slice_pos_get_error(const KrSlicePos* sp) { return (KrError)(uintptr_t)sp->_end; }
-static inline KrError _kr_error_get_error(const KrError* e) { return *e; }
+// General macros
+#define kr_is_err(ptr) (size_t)(ptr) >= SIZE_MAX - MAX_ERROR_CODE_AMOUNT
+#define kr_get_err(ptr) (KrError)(SIZE_MAX - (size_t)(ptr))
+#define kr_memrev(buf, size) _kr_memrev((KrByte*)(buf), (size_t)(size))
 
-#define kr_get_error(obj) _Generic((obj),                                       \
-    KrString:       _kr_string_get_error((const KrString*)&(obj)),              \
-    KrVector:       _kr_vector_get_error((const KrVector*)&(obj)),              \
-    KrStringView:   _kr_string_view_get_error((const KrStringView*)&(obj)),     \
-    KrSlicePos:     _kr_slice_pos_get_error((const KrSlicePos*)&(obj)),         \
-    KrError:        _kr_error_get_error((const KrError*)&(obj))                 \
-)
+// Stack macros
+#define kr_stk_new(type) (type*)_kr_stk_new(sizeof(type))
+#define kr_stk_cap(stack) ((size_t*)stack)[GET_STACK_CAPACITY_INDEX]
+#define kr_stk_size(stack) ((size_t*)stack)[GET_STACK_SIZE_INDEX]
+#define kr_stk_clear(stack) kr_stk_size((stack)) = 0
+#define kr_stk_push(stack, value) _kr_stk_push((KrByte**)(&stack), (KrByte*)(typeof(stack[0])[]){value}, sizeof(stack[0]))
+#define kr_stk_pop(stack, dest) _kr_stk_pop((KrByte*)(stack), (KrByte*)(&dest), sizeof(stack[0]))
+#define kr_stk_fit(stack) _kr_stk_fit((KrByte**)(&stack), sizeof(stack[0]))
+#define kr_stk_res(stack, size) _kr_stk_res((KrByte**)(&stack), (size_t)(size), sizeof(stack[0]))
+#define kr_stk_is_empty(stack) kr_stk_size((stack)) == 0
+#define kr_stk_peek(stack, dest) _kr_stk_peek((KrByte*)(stack), (KrByte*)(&dest), sizeof(stack[0]))
+#define kr_stk_free(stack) _kr_stk_free((KrByte**)(&stack))
+#define kr_stk_avail(stack) kr_stk_cap((stack)) - kr_stk_size((stack))
 
-#endif //KREST_H
+// Queue macros
+#define kr_que_new(type) (type*)_kr_que_new(sizeof(type))
+#define kr_que_cap(queue) ((size_t*)queue)[GET_QUEUE_CAPACITY_INDEX]
+#define kr_que_size(queue) ((size_t*)queue)[GET_QUEUE_SIZE_INDEX]
+#define kr_que_head(queue) ((size_t*)queue)[GET_QUEUE_HEAD_INDEX]
+#define kr_que_tail(queue) ((size_t*)queue)[GET_QUEUE_TAIL_INDEX]
+#define kr_que_enq(queue, value) _kr_que_enq((KrByte**)(&queue), (KrByte*)(typeof(queue[0])[]){value}, sizeof(queue[0]))
+#define kr_que_deq(queue, dest) _kr_que_deq((KrByte*)(queue), (KrByte*)(&dest), sizeof(queue[0]))
+#define kr_que_clear(queue) _kr_que_clear((KrByte*)(queue))
+#define kr_que_free(queue) _kr_que_free((KrByte**)(&queue))
+#define kr_que_is_empty(queue) kr_que_size((queue)) < 1
+#define kr_que_avail(queue) kr_que_cap((queue)) - kr_que_size((queue))
+#define kr_que_peek(queue, dest) _kr_que_peek((KrByte*)(queue), (KrByte*)(&dest), sizeof(queue[0]))
+#define kr_que_fit(queue) _kr_que_fit((KrByte**)(&queue), sizeof(queue[0]))
+#define kr_que_res(queue, size) _kr_que_res((KrByte**)(&queue), (size_t)(size), sizeof(queue[0]))
+
+// Deque macros
+#define kr_dque_new(type) (type*)_kr_dque_new(sizeof(type))
+#define kr_dque_hdr(dque) (KrDqueHeader*)((KrByte*)(dque) - sizeof(KrDqueHeader))
+#define kr_dque_pushb(dque, value) _kr_dque_pushb((KrByte**)(&dque), (KrByte*)(typeof(dque[0])[]){value}, sizeof(dque[0]))
+#define kr_dque_popb(dque, dest) _kr_dque_popb((KrByte**)(&dque), (KrByte*)(&dest), sizeof(dque[0]))
+#define kr_dque_free(dque) _kr_dque_free((KrByte**)(&dque))
+#define kr_dque_at(dque, dest, index) _kr_dque_at((KrByte**)(&dque), (KrByte*)(&dest), (index), sizeof(dque[0]))
+#define kr_dque_is_empty(dque) _kr_dque_is_empty((KrByte**)(&dque))
+
+// General functions
+KrError _kr_memrev(KrByte* buf, const size_t size);
+void _kr_auto_init() __attribute__((constructor));
+
+// Stack functions
+KrByte* _kr_stk_new(const size_t type_size);
+KrError _kr_stk_push(KrByte** stk, const KrByte* value, const size_t type_size);
+KrError _kr_stk_pop(KrByte* stk, KrByte* dest, const size_t type_size);
+KrError _kr_stk_fit(KrByte** stk, const size_t type_size);
+KrError _kr_stk_res(KrByte** stk, const size_t new_cap, const size_t type_size);
+KrError _kr_stk_peek(KrByte* stk, KrByte* dest, const size_t type_size);
+KrError _kr_stk_free(KrByte** stk);
+
+// Queue functions
+KrByte* _kr_que_new(const size_t type_size);
+KrError _kr_que_enq(KrByte** que, const KrByte* value, const size_t type_size);
+KrError _kr_que_deq(KrByte* que, KrByte* dest, const size_t type_size);
+KrError _kr_que_clear(KrByte* que);
+KrError _kr_que_peek(KrByte* que, KrByte* dest, const size_t type_size);
+KrError _kr_que_fit(KrByte** que, const size_t type_size);
+KrError _kr_que_res(KrByte** que, const size_t new_cap, const size_t type_size);
+KrError _kr_que_free(KrByte** que);
+
+// Deque functions
+KrByte* _kr_dque_new(const size_t type_size);
+KrError _kr_dque_pushb(KrByte** dque, const KrByte* value, const size_t type_size);
+KrError _kr_dque_popb(KrByte** dque, KrByte* dest, const size_t type_size);
+KrError _kr_dque_at(KrByte** dque, KrByte* dest, const size_t index, const size_t type_size);
+bool _kr_dque_is_empty(KrByte** dque);
+KrError _kr_dque_free(KrByte** dque);
+
+#endif
 
 #ifdef KREST_IMPLEMENTATION
 
-// Implementations
-#include <stdio.h>
-#include <string.h>
+/*
+ * **********************
+ * # Internal Functions #
+ * **********************
+*/
 
-void _kr_free_string_ptr(KrString* s) { if(s->_data && s->_size != SIZE_MAX) kr_free_string(s); }
-void _kr_free_vector_ptr(KrVector* v) { if (v->_data && v->_size != SIZE_MAX) kr_free_vector(v); }
-
-__attribute__((constructor))
 void _kr_auto_init() {
 
-    // We are not doing embeded here
-    static_assert(sizeof(size_t) <= 8 && "Krest only supports 64-bit systems!");
+    // We are not doing embedded here
+    static_assert(sizeof(size_t) >= 8 && "Krest only supports 64-bit systems!");
 
 }
 
-// These functions are examples of Impossible Sentinel Values + Data Multiplexing
-// SIZE_MAX = 18,446,744,073,709,551,615 in 64-bit systems which explains _kr_auto_init function above
-// It's always a bigger value then there is memory addresses in the computer saying its astronomicaly large would be an
-// understatement SIZE_MAX is the known universe of numbers inside computers we then put the error_code somewhere in
-// the struct we are already going to return anyway which is the multiplexing partthat's why it's called a zero-cost
-// abstraction but since its complicated I handle it inside the library and use _Generic macro to dispatch/paste
-// according to the type passed as argument by the C Preprocessor at compile-time
-inline KrSlicePos _kr_return_err_splice_pos(const KrError error_code) {
+void _kr_stk_malloc(KrByte** new_buf, const size_t type_size) {
 
-    return (KrSlicePos) {
+    const size_t malloc_size_b = STACK_HEADER_SIZE_B + (DEFAULT_STACK_CAPACITY_S * type_size);
+    for (size_t i = 0; i < MAX_ATTEMPT; i++) {
 
-        ._start = SIZE_MAX,
-        ._end = (size_t)error_code
+        *new_buf = malloc(malloc_size_b);
+        // This check ensure the last 100 addresses are reserved for sentinel error codes since we employ data multiplexing here
+        if (*new_buf && (size_t)*new_buf < (SIZE_MAX - MAX_ERROR_CODE_AMOUNT)) { break; }
 
-    };
+    }
 
 }
 
-inline KrString _kr_return_err_string(char* data_ptr, const KrError error_code) {
+void _kr_stk_realloc(KrByte** new_buf, KrByte** stk, const size_t type_size, const KrByte growth_factor) {
 
-    if (data_ptr != (char*)SIZE_MAX) { free(data_ptr); }
+    KrByte* header = *stk - STACK_HEADER_SIZE_B;
 
-    return (KrString) {
+    // If cap hits zero it breaks the growth factor math since zero swallows everything when multiplied
+    if (kr_stk_cap(*stk) < 1) { kr_stk_cap(*stk) = 1; }
 
-        ._size = SIZE_MAX,
-        ._capacity = 0,
-        ._data = (char*)error_code
+    const size_t realloc_size_b = STACK_HEADER_SIZE_B + ((kr_stk_cap(*stk) * type_size) * growth_factor);
+    for (size_t i = 0; i < MAX_ATTEMPT; i++) {
 
-    };
+        *new_buf = realloc((void*)header, realloc_size_b);
+        if (*new_buf && (size_t)*new_buf < (SIZE_MAX - MAX_ERROR_CODE_AMOUNT)) { break; }
 
-}
+    }
 
-inline KrStringView _kr_return_err_string_view(const KrError error_code) {
+    if (!*new_buf) { return; }
 
-    return (KrStringView) {
-
-        ._size = SIZE_MAX,
-        ._data = (char*)error_code
-
-    };
+    // Rebinding
+    *stk = *new_buf + STACK_HEADER_SIZE_B;
+    kr_stk_cap(*stk) *= growth_factor;
 
 }
 
-inline KrVector _kr_return_err_vector(char* data_ptr, const KrError error_code) {
+void _kr_que_malloc(KrByte** new_buf, const size_t type_size) {
 
-    if (data_ptr != (char*)SIZE_MAX) { free(data_ptr); }
+    const size_t malloc_size_b = QUEUE_HEADER_SIZE_B + (DEFAULT_QUEUE_CAPACITY_S * type_size);
+    for (size_t i = 0; i < MAX_ATTEMPT; i++) {
 
-    return (KrVector) {
+        *new_buf = malloc(malloc_size_b);
+        if (*new_buf && (size_t)*new_buf < (SIZE_MAX - MAX_ERROR_CODE_AMOUNT)) { break; }
 
-        ._size = SIZE_MAX,
-        ._capacity = 0,
-        ._type_size = 1,    // To avoid division by zero errors or maybe I should let the user fail I am not sure
-        ._data = (void*)error_code
-
-    };
+    }
 
 }
 
-bool _kr_update_string_capacity(KrString* str) {
+void _kr_que_grow(KrByte** new_buf, KrByte** que, const size_t type_size, const KrByte growth_factor) {
+
+    // If cap is 0 it breaks the cap * type_size math
+    if (kr_que_cap(*que) < 1) { kr_que_cap(*que) = 1; }
+
+    // Allocate new_buf
+    const size_t malloc_size_b = QUEUE_HEADER_SIZE_B + ((kr_que_cap(*que) * type_size) * growth_factor);
+    for (size_t i = 0; i < MAX_ATTEMPT; i++) {
+
+        *new_buf = malloc(malloc_size_b);
+        if (*new_buf && (size_t)*new_buf < (SIZE_MAX - MAX_ERROR_CODE_AMOUNT)) { break; }
+
+    }
+
+    // Safety fuse - realloc fail instead of malloc fail for consistency with other objects fit functions
+    // this function is essentially a manual realloc with buffer linearization
+    if (!new_buf) { return; }
+
+    // Copy header into new_buf
+    KrByte* header = *que - QUEUE_HEADER_SIZE_B;
+    memcpy(*new_buf, header, QUEUE_HEADER_SIZE_B);
+
+    // Create new handle
+    KrByte* new_handle = *new_buf + QUEUE_HEADER_SIZE_B;
+
+    if (kr_que_tail(*que) < kr_que_head(*que)) {
+
+        // 1. First memcpy from and including head to the end of the queue into new_buf queue section
+        const size_t tail_from_head_b = (kr_que_cap(*que) - kr_que_head(*que)) * type_size;
+        const KrByte* head_to_mem = *que + (kr_que_head(*que) * type_size);
+        memcpy(new_handle, head_to_mem, tail_from_head_b);
+
+        // 2. Than memcpy from the start of the *que into new_buf queue section up until and excluding tail
+        KrByte* resumption = new_handle + tail_from_head_b;
+        memcpy(resumption, *que, kr_que_tail(*que) * type_size);
+
+        // 3. Set tail and head accordingly
+        kr_que_tail(new_handle) = kr_que_size(*que);
+        kr_que_head(new_handle) = DEFAULT_QUEUE_HEAD_S;
+
+    }
+    else if (kr_que_tail(*que) > kr_que_head(*que)) {
+
+        // We need to assume the worst possible situtation for linear grow which is head and tail being
+        // in the middle of the buffer or at the end of it in that case we cant just memcpy N empty slots
+        // that would be massively inefficient
+
+        // In order to do that I need to convert head index into a memory address
+        const KrByte* head_to_mem = *que + (kr_que_head(*que) * type_size);
+
+        // Now I need to memcpy from the address above using size
+        memcpy(new_handle, head_to_mem, kr_que_size(*que) * type_size);
+
+        // Update tail and head accordingly
+        kr_que_tail(new_handle) = kr_que_size(*que);
+        kr_que_head(new_handle) = DEFAULT_QUEUE_HEAD_S;
+
+    }
+
+    // Update cap accordingly
+    kr_que_cap(new_handle) *= growth_factor;
+
+    // Manually free *que since we don't use realloc but malloc
+    free(header);
+
+}
+
+KrError _kr_dque_map_block_add(KrByte** map_handle, const size_t type_size, const bool side) {
+
+    // Allocating new block
+    KrByte* new_buf_block = calloc(KR_DEFAULT_DEQUE_BLOCK_SIZE_S, type_size);
+
+    // If calloc fails abort
+    if (new_buf_block == nullptr) { return KR_ERR_MALLOC_FAIL; }
+
+    // Get header
+    KrDqueHeader* header = kr_dque_hdr(*map_handle);
+
+    // Grow map if needed
+    if (header->map_size >= header->map_cap) {
+
+        // Realloc
+        const size_t map_realloc_size_b = sizeof(KrDqueHeader) + ((header->map_cap * KR_POINTER_SIZE_B) * 2);
+        KrByte* new_buf_map = realloc((void*)header, map_realloc_size_b);
+
+        // Abort if failed
+        if (new_buf_map == nullptr) { return KR_ERR_REALLOC_FAIL; }
+
+        // Rebind
+        *map_handle = new_buf_map + sizeof(KrDqueHeader);
+        header = kr_dque_hdr(*map_handle);
+
+        // Update cap
+        header->map_cap *= 2;
+
+    }
+
+    // False means left, true means right
+    if (side == false) {
+
+        // TODO: Implement add block left
+
+    }
+    else if (side == true) {
+
+        // Map size is cardinal while index values are ordinal
+        // because of this map size is pointing to then next available slot
+        // KrByte* map_target = *map_handle + (header->map_size * KR_POINTER_SIZE_B);
+        // memcpy(map_target, &new_buf_block, KR_POINTER_SIZE_B);
+
+        KrByte** map_slots = (KrByte**)*map_handle;
+        map_slots[header->map_size] = new_buf_block;
+
+    }
+
+    // Deque cap needs to increase by one block and map size needs to increase by one
+    header->map_size += 1;
+
+    return KR_SUCCESS;
+
+}
+
+KrError _kr_dque_map_block_remove(KrByte** map_handle, const size_t type_size, const bool side) {
+
+    // Get header
+    KrDqueHeader* header = kr_dque_hdr(*map_handle);
+
+    // We should reserve at least 1 block at all times
+    if (header->map_size < 2) { return KR_ERR_SMALL_INPUT; }
+
+    // False means left, true means right
+    if (side == false) {
+
+        // TODO: Implement remove from left
+
+    }
+    else if (side == true) {
+
+        // Get last block of map with map_size - 1
+        KrByte** last_block_ptr = ((KrByte**)*map_handle) + (header->map_size - 1);
+
+        // Free and nullify
+        free((void*)*last_block_ptr);
+        ((KrByte**)*map_handle)[header->map_size - 1] = nullptr;
+
+        // Decrement map_size and dque_cap
+        header->map_size -= 1;
+
+    }
+
+    return KR_SUCCESS;
+
+}
+
+KrByte* _kr_dque_idx2coor(KrByte** map_handle, const size_t index, const size_t type_size) {
+
+    // Calculate coordinates
+    const size_t map_idx    = index / KR_DEFAULT_DEQUE_BLOCK_SIZE_S;
+    const size_t block_idx  = index % KR_DEFAULT_DEQUE_BLOCK_SIZE_S;
+
+    // Follow them and find where tail points to
+    KrByte* block_addr = *(((KrByte**)*map_handle) + map_idx);  // God have mercy...
+    KrByte* item_addr = block_addr + (block_idx * type_size);
+
+    // Return a pointer to it
+    return item_addr;
+
+}
+
+/*
+ * ********************
+ * # General Funtions #
+ * ********************
+*/
+
+KrError _kr_memrev(KrByte* buf, const size_t size) {
 
     // Error handling
-    if (!str) { return false; }
+    if (!buf) { return KR_ERR_NULL_INPUT; }
+    if (size == 0) { return KR_ERR_EMPTY; }
 
-    // Just in case
-    if (str->_capacity == 0) { str->_capacity = DEFAULT_STRING_CAPACITY; }
+    // Actual reverse
+    KrByte* head = buf;
+    KrByte* tail = &buf[size - 1];  // Value to index convertion
+    KrByte temp = 0;
+    while (head < tail) {
 
-    // _capacity update if necessary
-    const size_t old_capacity = str->_capacity;
-    size_t new_capacity = str->_capacity;
-    while (str->_size + NULL_TERMINATOR_LEN >= new_capacity) { new_capacity *= 2; }
+        // Store head in temp, put tail in head, put temp in tail
+        temp = *head;
+        *head = *tail;
+        *tail = temp;
 
-    // Ensure to only realloc if there is a change in _capacity
-    if (old_capacity != new_capacity) {
-
-        // realloc is smart enough to act like malloc when user inputs nullptr to the first argument
-        // whole functions banks on it when it comes to empty strings or user inputting nullptr
-        char* new_mem = realloc(str->_data, new_capacity);
-        if (new_mem == nullptr) { return false; }
-
-        // Else
-        str->_capacity = new_capacity;
-        str->_data = new_mem;
-
-    }
-
-    return true;
-
-}
-
-inline bool _kr_check_replace_helper(const KrString* str, const char src[], const char with[]) {
-
-    if (!str || !src || !with || strlen(src) > str->_size) { return false; }
-
-    return true;
-
-}
-
-bool kr_minimize_string_capacity(KrString* str) {
-
-    const size_t used_capacity = str->_size + NULL_TERMINATOR_LEN;
-    if (str->_capacity > used_capacity) {
-
-        char* new_mem = realloc(str->_data, used_capacity);
-        if (!new_mem) { return false; }
-
-        str->_capacity = used_capacity;
-        str->_data = new_mem;
-
-    }
-
-    return true;
-
-}
-
-KrString kr_new_string(const char src[]) {
-
-    if (!src) { return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
-
-    // Create new KrString object
-    KrString s = {0};
-
-    // Initialise
-    s._size = strlen(src);
-
-    if (s._size + NULL_TERMINATOR_LEN >= DEFAULT_STRING_CAPACITY) { s._capacity = s._size + DEFAULT_STRING_CAPACITY; }
-    else { s._capacity = DEFAULT_STRING_CAPACITY; }
-
-    char* new_data = malloc(s._capacity);
-    if (!new_data) {
-        free(new_data);
-        return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_MALLOC_FAIL);
-    }
-    // Else
-    s._data = new_data;
-
-    // _data transfer
-    memcpy(s._data, src, s._size + NULL_TERMINATOR_LEN);
-
-    return s;
-
-}
-
-KrVector kr_new_vector(size_t _type_size) {
-
-    KrVector vector;
-    vector._capacity = DEFAULT_VECTOR_CAPACITY;
-
-    void* new_data = malloc(_type_size * vector._capacity);
-    if (!new_data) {
-        free(new_data);
-        return _kr_return_err_vector((char*)SIZE_MAX, KR_ERR_MALLOC_FAIL);
-    }
-    // Else
-    vector._data = new_data;
-
-    vector._type_size = _type_size;
-    vector._size = 0;
-
-    return vector;
-
-}
-
-KrError kr_append_string(KrString* dst, const char src[]) {
-
-    if (!dst || !src) { return KR_ERR_NULL_INPUT; }
-
-    // Calculate new _size and update dst's _capacity accordingly
-    const size_t old_size = dst->_size;
-    const size_t src_len = strlen(src);
-    dst->_size = dst->_size + src_len;
-    if (!_kr_update_string_capacity(dst)) {
-
-        // By doing this I avoid zombie state if realloc fails we reset the state before return since this function
-        // does mutation
-        dst->_size = old_size;
-        return KR_ERR_REALLOC_FAIL;
-
-    }
-
-    // Appending
-    memcpy(&dst->_data[old_size], src, src_len + NULL_TERMINATOR_LEN);
-
-    return KR_SUCCESS;
-
-}
-
-KrError kr_reverse_bytes(uint8_t* src, size_t size) {
-    // Nothing to reverse
-    if (size < 2) { return KR_ERR_SMALL_INPUT; }
-
-    // Notice the type uint8_t* it's a pointer to a char/uint8_t I use it to peek at bytes, it's load-agnostic logic
-    uint8_t* front = src;
-    uint8_t* back = src + size - 1;
-    uint8_t  temp = 0;
-
-    while (front < back) {
-
-        // The classic 3-step swap
-        temp = *front;
-        *front = *back;
-        *back = temp;
-
-        front++;
-        back--;
+        // Increase head, decrease tail
+        head += 1;
+        tail -= 1;
 
     }
 
@@ -422,514 +479,417 @@ KrError kr_reverse_bytes(uint8_t* src, size_t size) {
 
 }
 
-KrError kr_append_to_vector(KrVector* dst, const void* src) {
+bool _kr_dque_is_empty(KrByte** dque) {
 
-    if (!dst || !src) { return KR_ERR_NULL_INPUT; }
+    // Get header
+    const KrDqueHeader* header = kr_dque_hdr(*dque);
 
-    if (dst->_size + 1 >= dst->_capacity) {
+    // Is empty
+    return header->dque_size < 1;
 
-        dst->_capacity *= 2;
-        void* new_data = realloc(dst->_data, dst->_capacity * dst->_type_size);
-        if (!new_data) { return KR_ERR_REALLOC_FAIL; }
-        // Else
-        dst->_data = new_data;
+}
+
+/*
+ * *******************
+ * # Object Creation #
+ * *******************
+*/
+
+KrByte* _kr_stk_new(const size_t type_size) {
+
+    // Creation
+    KrByte* new_buf = nullptr;
+    _kr_stk_malloc(&new_buf, type_size);
+
+    if (!new_buf) { return (KrByte*)(SIZE_MAX - KR_ERR_MALLOC_FAIL); }
+
+    // Initialization
+    ((size_t*)new_buf)[0] = DEFAULT_STACK_CAPACITY_S;
+    ((size_t*)new_buf)[1] = DEFAULT_STACK_SIZE_S;
+
+    return new_buf + STACK_HEADER_SIZE_B;
+
+}
+
+KrByte* _kr_que_new(const size_t type_size) {
+
+    // Creation
+    KrByte* new_buf = nullptr;
+    _kr_que_malloc(&new_buf, type_size);
+
+    if (!new_buf) { return (KrByte*)(SIZE_MAX - KR_ERR_MALLOC_FAIL); }
+
+    // Initialization
+    ((size_t*)new_buf)[0] = DEFAULT_QUEUE_CAPACITY_S;
+    ((size_t*)new_buf)[1] = DEFAULT_QUEUE_SIZE_S;
+    ((size_t*)new_buf)[2] = DEFAULT_QUEUE_HEAD_S;
+    ((size_t*)new_buf)[3] = DEFAULT_QUEUE_TAIL_S;
+
+    return new_buf + QUEUE_HEADER_SIZE_B;
+
+}
+
+KrByte* _kr_dque_new(const size_t type_size) {
+
+    // We are going to implement a block-map deque the overall logic of it is simple we have a map that map has pointers
+    // to block we use / and % operators to calculate our coordinates get a pointer in desired block and operate on that
+
+    // Let's start creating a header object and mapping it
+    KrDqueHeader map_header = {0};  // ZII
+    map_header.map_cap = KR_DEFAULT_DEQUE_MAP_CAP_S;
+    map_header.map_size = KR_DEFAULT_DEQUE_MAP_SIZE_S;
+    map_header.dque_size = KR_DEFAULT_DEQUE_SIZE_S;
+    map_header.head = KR_DEFAULT_DEQUE_HEAD_INDEX;
+    map_header.tail = KR_DEFAULT_DEQUE_TAIL_INDEX;
+
+    // Now we need to allocate map buffer itself
+    const size_t map_buf_malloc_size_b = sizeof(map_header) + (KR_DEFAULT_DEQUE_MAP_CAP_S * KR_POINTER_SIZE_B);
+    KrByte* new_buf_map = calloc(map_buf_malloc_size_b, 1);
+
+    // If malloc fails abort
+    if (new_buf_map == nullptr) { return (KrByte*)(SIZE_MAX - KR_ERR_MALLOC_FAIL); }
+
+    // Put header into buffer
+    memcpy(new_buf_map, &map_header, sizeof(map_header));
+
+    // Map handle creation
+    KrByte* map_handle = new_buf_map + sizeof(map_header);
+
+    // Also let's not forget to add one block for the road
+    _kr_dque_map_block_add(&map_handle, type_size, KR_DO_RIGHT);
+
+    return map_handle;
+
+}
+
+/*
+ * ****************
+ * # Reading Data #
+ * ****************
+*/
+
+KrError _kr_stk_peek(KrByte* stk, KrByte* dest, const size_t type_size) {
+
+    // Error handling
+    if (kr_stk_is_empty(stk)) { return KR_ERR_EMPTY; }
+
+    // Actual peek
+    const KrByte* peek = &stk[(kr_stk_size(stk) - 1) * type_size];
+    memcpy(dest, peek, type_size);
+
+    return KR_SUCCESS;
+
+}
+
+KrError _kr_que_peek(KrByte* que, KrByte* dest, const size_t type_size) {
+
+    // Error handling
+    if (kr_que_is_empty(que)) { return KR_ERR_EMPTY; }
+
+    // Actual peek
+    const KrByte* peek = &que[kr_que_head(que) * type_size];
+    memcpy(dest, peek, type_size);
+
+    return KR_SUCCESS;
+
+}
+
+KrError _kr_dque_at(KrByte** dque, KrByte* dest, const size_t index, const size_t type_size) {
+
+    // We are going to create another virtual number line from head to tail for this implementation
+    // since pushf uses head to push to front we are conceptually consistant and valid
+
+    // Get header
+    KrDqueHeader* header = kr_dque_hdr(*dque);
+
+    // Convert supplied index to virtual index our conceptual contract can understand
+    // so basically virtual to virtual conversion, crazy right
+    const size_t virtual_index = header->head + index;
+
+    // Find the item using conceptually consistent virtual index and load it into destination buffer
+    const KrByte* item = _kr_dque_idx2coor(dque, index, type_size);
+    memcpy(dest, item, type_size);
+
+    return KR_SUCCESS;
+
+}
+
+/*
+ * ***************
+ * # Adding Data #
+ * ***************
+*/
+
+KrError _kr_stk_push(KrByte** stk, const KrByte* value, const size_t type_size) {
+
+    // Realloc if needed
+    if (kr_stk_size(*stk) + 1 > kr_stk_cap(*stk)) {
+
+        KrByte* new_buf = nullptr;
+        _kr_stk_realloc(&new_buf, stk, type_size, 2);
+
+        if (!new_buf) { return KR_ERR_REALLOC_FAIL; }
 
     }
 
-    // Actual append
-    memcpy(&dst->_data[dst->_size * dst->_type_size], src, dst->_type_size);
-    dst->_size += 1;
+    // Actual push
+    KrByte* dest = *stk + (kr_stk_size(*stk) * type_size);
+    memcpy(dest, value, type_size);
+    kr_stk_size(*stk) += 1;
 
     return KR_SUCCESS;
 
 }
 
-void* kr_get_vector_element(const KrVector* src, size_t index) {
+KrError _kr_que_enq(KrByte** que, const KrByte* value, const size_t type_size) {
 
-    return &src->_data[index * src->_type_size];
+    // Resize if needed
+    if (kr_que_size(*que) + 1 >= kr_que_cap(*que)){
 
-}
+        KrByte* new_buf = nullptr;
+        _kr_que_grow(&new_buf, que, type_size, 2);
 
-KrError kr_insert_char(KrString* dst, char src, size_t index) {
+        if (!new_buf) { return KR_ERR_REALLOC_FAIL; }
 
-    if (!dst) { return KR_ERR_NULL_INPUT; }
-    if (index >= dst->_size) { return KR_ERR_INDEX_OOB; }
-
-    // Calculate new _size and update _capacity
-    const size_t old_size = dst->_size;
-    dst->_size = dst->_size + sizeof(src);
-    if (!_kr_update_string_capacity(dst)) { return KR_ERR_REALLOC_FAIL; }
-
-    // 1 here means start moving into after the insert gap, do not move what will be inserted char
-    memmove(&dst->_data[index] + 1, &dst->_data[index], old_size - index);
-
-    // Insertion
-    // +1 here is needed since we change the _size old index points to a different place than it used to
-    // amount of increment to index is equal to how far away we moved the memory after index which is +1
-    // as reader can see above in the first argument of the memmove
-    dst->_data[index] = src;
-    dst->_data[dst->_size] = '\0';
-
-    return KR_SUCCESS;
-
-}
-
-KrError kr_insert_string(KrString* dst, const char src[], size_t index) {
-
-    if (!dst || !src) { return KR_ERR_NULL_INPUT; }
-
-    if (index >= dst->_size) { return KR_ERR_INDEX_OOB; }
-
-    const size_t src_len = strlen(src);
-    if (src_len == 0) { return KR_ERR_SMALL_INPUT; }
-
-    // Calculate new _size and update _capacity
-    const size_t old_size = dst->_size;
-    dst->_size = dst->_size + src_len;
-    if (!_kr_update_string_capacity(dst)) { return KR_ERR_REALLOC_FAIL; }
-
-    // Create gap
-    memmove(&dst->_data[index + src_len], &dst->_data[index], old_size - index);
-
-    // Insertion
-    memcpy(&dst->_data[index], src, src_len);
-    dst->_data[dst->_size] = '\0';
-
-    return KR_SUCCESS;
-
-}
-
-KrStringView kr_slice_string(const KrString* src, size_t index, size_t size) {
-
-    if (!src) { return _kr_return_err_string_view(KR_ERR_NULL_INPUT); }
-
-    return (KrStringView) { ._data = &src->_data[index], ._size = size };
-
-}
-
-bool kr_is_empty_string(const KrString* str) {
-
-    if (!str || !str->_data) { return false; }
-
-    if (str->_data[0] == '\0') { return true; }
-    // Else if not empty
-    return false;
-
-}
-
-bool kr_is_string_all_whitespace(const KrString* str) {
-
-    if (!str) { return false; }
-    if (kr_is_empty_string(str)) { return false; }
-
-    for (size_t i = 0; i < str->_size; i++) {
-
-        if (str->_data[i] != ' ') { return false; }
+        // Rebind
+        *que = new_buf + QUEUE_HEADER_SIZE_B;
 
     }
 
-    return true;
-
-}
-
-KrSlicePos kr_find_substring(const KrString* str, const char src[]) {
-
-    KrSlicePos pos = { 0, 0, };
-
-    if (!str || !src || kr_is_error(*str)) { return _kr_return_err_splice_pos(KR_ERR_NULL_INPUT); }
-
-    if (strlen(src) > str->_size) { return _kr_return_err_splice_pos(KR_ERR_INDEX_OOB); }
-
-    const size_t src_size = strlen(src);
-    if (src_size == 0) { return _kr_return_err_splice_pos(KR_ERR_SMALL_INPUT); }
-
-    // Number of iterations = main string length - substring length
-    // Sliding window implementation
-    bool found = false;
-    for (size_t i = 0; i <= str->_size - src_size; i++) {
-
-        if (memcmp(&str->_data[i], src, src_size) == 0) {
-
-            // -1 is a convertion from string length to array index value
-            pos._start = i;
-            pos._end = src_size + i - 1;
-            found = true;
-            break;
-
-        }
-
-    }
-
-    if (!found) { return _kr_return_err_splice_pos(KR_ERR_NOT_FOUND); }
-
-    return pos;
-
-}
-
-KrError kr_replace_first_substring(KrString* str, const char src[], const char with[]) {
-
-    if (!_kr_check_replace_helper(str, src, with)) { return KR_ERR_NULL_INPUT; }
-
-    const KrSlicePos pos = kr_find_substring(str, src);
-    if (kr_is_error(pos)) { return KR_ERR_NOT_FOUND; }
-
-    const ssize_t diff = (ssize_t)strlen(with) - (ssize_t)strlen(src);
-    if (diff >= 0) {
-
-        str->_size += diff;
-        if (!_kr_update_string_capacity(str)) { return KR_ERR_REALLOC_FAIL; }
-
-    }
-
-    // Calculating how much and what to move
-    // +1 here is present because pos.end is exclusive
-    char* tail = &str->_data[pos._end + 1];
-    const size_t bytes_to_move = strlen(tail) + NULL_TERMINATOR_LEN;
-
-    // We don't need to use memmove if there is nothing to move meaning the gap is where it needs to be
-    if (diff != 0) memmove(tail + diff, tail, bytes_to_move);
-    memcpy(&str->_data[pos._start], with, strlen(with));
+    // Actual enqueue
+    memcpy((*que) + (kr_que_tail(*que) * type_size), value, type_size);
+    kr_que_size(*que) += 1;
+    kr_que_tail(*que) = (kr_que_tail(*que) + 1) % kr_que_cap(*que);
 
     return KR_SUCCESS;
 
 }
 
-KrVector kr_find_all_substrings(const KrString* str, const char src[]) {
+KrError _kr_dque_pushb(KrByte** dque, const KrByte* value, const size_t type_size) {
 
-    if (!str || !src || kr_is_error(*str)) { return _kr_return_err_vector((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
+    // Get header
+    KrDqueHeader* header = kr_dque_hdr(*dque);
 
-    // Positions array
-    KrVector positions = kr_new_vector(sizeof(KrSlicePos));
+    // Check if we are going to need another block
+    if (header->tail + 1 > header->map_size * KR_DEFAULT_DEQUE_BLOCK_SIZE_S) {
 
-    const size_t src_len = strlen(src);
-    if (src_len == 0) { return _kr_return_err_vector(positions._data, KR_ERR_SMALL_INPUT); }
-
-    // Sliding window implementation and occurrence storing
-    const size_t step_amount = str->_size - src_len;
-    KrSlicePos pos = { 0, 0 };
-    bool found = false;
-    for (size_t i = 0; i <= step_amount; i++) {
-
-        // Start from ith offset go as long as length of src and compare with src, 0 means no difference has been found
-        if (memcmp(&str->_data[i], src, src_len) == 0) {
-
-            // -1 means pos.end includes the char after the end for some reason I don't know why
-            pos._start = i;
-            pos._end = src_len + i - 1;
-
-            KrError ret = kr_append_to_vector(&positions, &pos);
-            if (kr_is_error(ret)) { printf("Cought append error!\n"); exit(0); }
-
-            found = true;
-
-        }
+        _kr_dque_map_block_add(dque, type_size, KR_DO_RIGHT);
+        header = kr_dque_hdr(*dque);
 
     }
 
-    if (!found) { return _kr_return_err_vector(positions._data, KR_ERR_NOT_FOUND); }
-
-    return positions;
-
-}
-
-KrError kr_replace_all_substrings(KrString* str, const char src[], const char with[]) {
-
-    if (!_kr_check_replace_helper(str, src, with)) { return KR_ERR_NULL_INPUT; }
-
-    // Positions array
-    autofree_krvector const KrVector positions = kr_find_all_substrings(str, src);
-    if (kr_is_error(positions)) { return KR_ERR_NOT_FOUND; }
-
-    if (positions._size == SIZE_MAX) { return KR_ERR_NOT_FOUND; }
-
-    // Length of src
-    const size_t src_len = strlen(src);
-
-    // Construction of the new string buffer
-    const ssize_t diff_per_occurrence = (ssize_t)strlen(with) - (ssize_t)src_len;
-    const ssize_t cum_diff_of_changes = diff_per_occurrence * (ssize_t)positions._size;
-    const size_t final_size = str->_size + cum_diff_of_changes;
-
-    char* new_buffer = malloc(final_size  + NULL_TERMINATOR_LEN * sizeof(char));
-    if (!new_buffer) {
-        free(new_buffer);
-        return KR_ERR_MALLOC_FAIL;
-    }
-    new_buffer[final_size] = '\0';
-
-    // Filling new_buffer with double-pointer technique
-    size_t nb_cursor = 0;
-    size_t str_cursor = 0;
-    size_t gap_len = 0;
-    const size_t with_len = strlen(with);
-    for (size_t i = 0; i < positions._size; i++) {
-
-        const KrSlicePos* pos = kr_get_vector_element(&positions, i);
-
-        gap_len = pos->_start - str_cursor;
-        if (gap_len > 0) {
-
-            memcpy(&new_buffer[nb_cursor], &str->_data[str_cursor], gap_len);
-            nb_cursor += gap_len;
-
-        }
-
-        memcpy(&new_buffer[nb_cursor], with, with_len);
-        nb_cursor += with_len;
-        str_cursor = pos->_end + 1;  // +1 means start from the next char dont include pos->end
-
-    }
-
-    // This is needed because we iterate over positions found that leaves the tail from the last pos in the old buffer
-    const size_t tail_len = str->_size - str_cursor;
-    if (tail_len > 0) {
-
-        memcpy(&new_buffer[nb_cursor], &str->_data[str_cursor], tail_len);
-        nb_cursor += tail_len;
-
-    }
-
-    // Binding new_buffer to str
-    str->_size = final_size;
-    str->_capacity = final_size + DEFAULT_STRING_CAPACITY + NULL_TERMINATOR_LEN;
-    free(str->_data);
-    str->_data = new_buffer;
+    // Actual pushb
+    KrByte* slot_addr = _kr_dque_idx2coor(dque, header->tail, type_size);
+    memcpy(slot_addr, value, type_size);
+    header->tail += 1;
+    header->dque_size += 1;
 
     return KR_SUCCESS;
 
 }
 
-KrError kr_replace_char(KrString* str, char with, size_t index) {
+/*
+ * *****************
+ * # Removing Data #
+ * *****************
+*/
 
-    if (!str) { return KR_ERR_NULL_INPUT; }
+KrError _kr_stk_pop(KrByte* stk, KrByte* dest, const size_t type_size) {
 
-    if (index >= str->_size) { return KR_ERR_INDEX_OOB; }
+    // If there is nothing to pop
+    if (kr_stk_is_empty(stk)) { return KR_ERR_EMPTY; }
 
-    str->_data[index] = with;
-
-    return KR_SUCCESS;
-
-}
-
-KrError kr_set_string_data(KrString* str, const char data[]) {
-
-    if (!str || !data) { return KR_ERR_NULL_INPUT; }
-
-    const size_t old_len = str->_size;
-    str->_size = strlen(data);
-    if (!_kr_update_string_capacity(str)) {
-        str->_size = old_len;
-        return KR_ERR_REALLOC_FAIL;
-    }
-
-    memcpy(str->_data, data, str->_size + NULL_TERMINATOR_LEN);
+    // Actual pop
+    kr_stk_size(stk) -= 1;
+    const KrByte* src = &stk[ kr_stk_size(stk) * type_size ];
+    memcpy(dest, src, type_size);
 
     return KR_SUCCESS;
 
 }
 
-KrError kr_split_string(KrString* str1, KrString* str2, size_t index) {
+KrError _kr_que_deq(KrByte* que, KrByte* dest, const size_t type_size) {
 
-    if (!str1 || !str2) { return KR_ERR_NULL_INPUT; }
-    if (index >= str1->_size) { return KR_ERR_INDEX_OOB; }
+    // Error handling
+    if (kr_que_size(que) < 1) { return KR_ERR_EMPTY; }
 
-    // Filling str2
-    const size_t right_hand_size = str1->_size - index;
-    const size_t old_len = str2->_size;
-    str2->_size = right_hand_size;
-    if (!_kr_update_string_capacity(str2)) {
-        str2->_size = old_len;
-        return KR_ERR_REALLOC_FAIL;
-    }
-
-    memcpy(str2->_data, &str1->_data[index], right_hand_size);
-    str2->_size = right_hand_size;
-    str2->_data[right_hand_size] = '\0';
-
-    // Clipping str1
-    const size_t left_hand_size = str1->_size - right_hand_size;
-    str1->_size = left_hand_size;
-    str1->_data[left_hand_size] = '\0';
+    // Actual deq
+    const KrByte* deq = &que[kr_que_head(que) * type_size];
+    kr_que_head(que) = (kr_que_head(que) + 1) % kr_que_cap(que);
+    kr_que_size(que) -= 1;
+    memcpy(dest, deq, type_size);
 
     return KR_SUCCESS;
 
 }
 
-KrError kr_preallocate_string(KrString* str, size_t capacity) {
+KrError _kr_dque_popb(KrByte** dque, KrByte* dest, const size_t type_size) {
 
-    if (!str) { return KR_ERR_NULL_INPUT; }
+    // Get header
+    KrDqueHeader* header = kr_dque_hdr(*dque);
 
-    // No need to reallocate
-    if (capacity <= str->_capacity) { return KR_ERR_SMALL_INPUT; }
+    // If deque is empty abort
+    if (header->dque_size < 1 || header->tail < 1) { return KR_ERR_EMPTY; }
 
-    // Resize
-    const size_t old_capacity = capacity;
-    char* new_mem = realloc(str->_data, capacity);
-    if (new_mem == nullptr) {
-        str->_capacity = old_capacity;
-        return KR_ERR_REALLOC_FAIL;
-    }
+    // Let's make the tail point to the last element instead of next slot
+    header->tail -= 1;
 
-    // Else
-    str->_capacity = capacity;
-    str->_data = new_mem;
+    // Remove block if last block is empty and we are at below 80% of the current block
+    const bool last_block_empty = header->tail < (header->map_size * KR_DEFAULT_DEQUE_BLOCK_SIZE_S) - KR_DEFAULT_DEQUE_BLOCK_SIZE_S;
+    const bool hysteresis = ((header->tail - 1) % KR_DEFAULT_DEQUE_BLOCK_SIZE_S) < (KR_DEFAULT_DEQUE_BLOCK_SIZE_S * 0.80);
+    if (last_block_empty && hysteresis) { _kr_dque_map_block_remove(dque, type_size, KR_DO_RIGHT); }
 
-    return KR_SUCCESS;
-
-}
-
-KrError kr_preallocate_vector(KrVector* vector, size_t size_byte) {
-
-    if (!vector) { return KR_ERR_NULL_INPUT; }
-
-    // No need to reallocate
-    if (size_byte <= vector->_capacity) { return KR_ERR_SMALL_INPUT; }
-
-    const size_t old_capacity = vector->_capacity;
-    vector->_capacity = size_byte;
-    void* new_data = realloc(vector->_data, vector->_capacity * vector->_type_size);
-    if (!new_data) {
-        vector->_capacity = old_capacity;
-        return KR_ERR_REALLOC_FAIL;
-    }
-    // Else
-    vector->_data = new_data;
+    // Actual popb
+    const KrByte* popb_item = _kr_dque_idx2coor(dque, header->tail, type_size);
+    memcpy(dest, popb_item, type_size);
+    header->dque_size -= 1;
 
     return KR_SUCCESS;
 
 }
 
-bool kr_is_equal_string(const KrString* str1, const KrString* str2) {
+/*
+ * *********************
+ * # Memory Management #
+ * *********************
+*/
 
-    if (!str1 || !str2) { return false; }
+KrError _kr_stk_fit(KrByte** stk, const size_t type_size) {
 
-    if (str1->_size != str2->_size) { return false; }
-    if (memcmp(str1->_data, str2->_data, str1->_size) != 0) { return false; }
+    // Shrink the allocated memory to fit the used memory
+    kr_stk_cap(*stk) = kr_stk_size(*stk);
+    KrByte* new_buf = nullptr;
+    _kr_stk_realloc(&new_buf, stk, type_size, 1);
 
-    return true;
-
-}
-
-KrString kr_shallow_copy_string(const KrString* str) {
-
-    if (!str) { return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
-
-    const KrString s = { ._capacity = str->_capacity, ._data = str->_data, ._size = str->_size };
-    return s;
-
-}
-
-KrString kr_deep_copy_string(const KrString* str) {
-
-    if (!str) { return _kr_return_err_string((char*)SIZE_MAX, KR_ERR_NULL_INPUT); }
-
-    KrString s = kr_new_string(str->_data);
-    s._capacity = str->_capacity;
-    s._size = str->_size;
-
-    return s;
-
-}
-
-KrError kr_string_pop_back(KrString* str) {
-
-    if (!str) { return KR_ERR_NULL_INPUT; }
-
-    if (str->_size == 0) { return KR_ERR_SMALL_INPUT; }
-
-    // -1 here is a convertion from size_t into an index value, last element to be precise
-    str->_data[str->_size - 1] = '\0';
-    str->_size -= 1;
+    if (!new_buf) { return KR_ERR_REALLOC_FAIL; }
 
     return KR_SUCCESS;
 
 }
 
-KrError kr_string_pop(KrString* str) {
+KrError _kr_stk_res(KrByte** stk, const size_t new_cap, const size_t type_size) {
 
-    if (!str) { return KR_ERR_NULL_INPUT; }
+    KrByte* new_buf = nullptr;
+    KrByte* handle = *stk - STACK_HEADER_SIZE_B;
+    const size_t new_size_b = STACK_HEADER_SIZE_B + (new_cap * type_size);
 
-    if (str->_size == 0) { return KR_ERR_SMALL_INPUT; }
+    // No need to shrink we have kr_stk_fit for that so it's a no-op
+    if (new_cap <= kr_stk_cap(*stk)) { return KR_SUCCESS; }
 
-    str->_size -= 1;
-    memmove(str->_data, &str->_data[1], str->_size);
-    str->_data[str->_size] = '\0';
+    for (size_t i = 0; i < MAX_ATTEMPT; i++) {
 
-    return KR_SUCCESS;
-
-}
-
-KrError kr_trim_string(KrString* src) {
-
-    if (!src) { return KR_ERR_NULL_INPUT; }
-
-    // Edge-case: If all whitespaces
-    if (kr_is_string_all_whitespace(src)) {
-
-        src->_size = 0;
-        src->_data[0] = '\0';
-        return KR_SUCCESS;
-
-   }
-
-    // Trim front
-    for (size_t i = 0; i < src->_size; i++) {
-
-        if (src->_data[i] != ' ') {
-
-            src->_size -= i;
-            memmove(src->_data, &src->_data[i], src->_size);
-            src->_data[src->_size] = '\0';
-            break;
-
-        }
+        new_buf = realloc((void*)handle, new_size_b);
+        if (new_buf && (size_t)new_buf < (SIZE_MAX - MAX_ERROR_CODE_AMOUNT)) { break; }
 
     }
 
-    // If the string is all whitespaces and it is sucessfully trimmed
-    if (src->_size == 0) return KR_SUCCESS;
+    if (!new_buf) { return KR_ERR_REALLOC_FAIL; }
 
-    // Trim back
-    // +1 and -1 here are conversions from nth element to index array values and back
-    // accessing _data requires starting from 0 where _size starts from 1
-    // This is often called cardinal (how many items) and ordinal (which one, index number)
-    if (src->_data[src->_size - 1] != ' ') return KR_SUCCESS;
-    for (size_t i = src->_size - 1; i > 0; i--) {
-
-        if (src->_data[i] != ' ') {
-
-            src->_data[i + NULL_TERMINATOR_LEN] = '\0';
-            src->_size = i + 1;
-            break;
-
-        }
-
-    }
+    *stk = new_buf + STACK_HEADER_SIZE_B;
+    kr_stk_cap(*stk) = new_cap;
 
     return KR_SUCCESS;
 
 }
 
-KrError kr_free_vector(KrVector* vector) {
+KrError _kr_que_fit(KrByte** que, const size_t type_size) {
 
-    if (!vector || !vector->_data) { return KR_ERR_NULL_INPUT; }
+    // Shrink the allocated memory to fit the used memory
+    // Cap needs to be size + 1 because we want to reserve the last slot for the tail in a linear configuration
+    // otherwise it may break unit tests and it is a pain in the ass to debug I can never get what values should be right...
+    kr_que_cap(*que) = kr_que_size(*que) + 1;
+    KrByte* new_buf = nullptr;
+    _kr_que_grow(&new_buf, que, type_size, 1);  // Linearize buffer to aid fragmentation
 
-    free(vector->_data);
-    vector->_data = nullptr;
+    // Rebind
+    *que = new_buf + QUEUE_HEADER_SIZE_B;
 
-    return KR_SUCCESS;
-
-}
-
-KrError kr_free_string(KrString* str) {
-
-    if (!str || !str->_data) { return KR_ERR_NULL_INPUT; }
-
-    free(str->_data);
-    str->_data = nullptr;
+    if (!new_buf) { return KR_ERR_REALLOC_FAIL; }
 
     return KR_SUCCESS;
 
 }
 
-#endif // KREST_IMPLEMENTATION
+KrError _kr_que_res(KrByte** que, const size_t new_cap, const size_t type_size) {
+
+    // No need to shrink we have kr_stk_fit for that so it's a no-op
+    if (new_cap <= kr_stk_cap(*que)) { return KR_SUCCESS; }
+
+    // Set cap to new_cap
+    kr_que_cap(*que) = new_cap;
+
+    // Linearize and memcpy buffer into new_buf
+    KrByte* new_buf = nullptr;
+    _kr_que_grow(&new_buf, que, type_size, 1);
+
+    if (!new_buf) { return KR_ERR_REALLOC_FAIL; }
+
+    // Rebind
+    *que = new_buf + QUEUE_HEADER_SIZE_B;
+
+    return KR_SUCCESS;
+
+}
+
+/*
+ * ********************
+ * # Resetting Object #
+ * ********************
+*/
+
+KrError _kr_que_clear(KrByte* que) {
+
+    kr_que_head(que) = DEFAULT_QUEUE_HEAD_S;
+    kr_que_tail(que) = DEFAULT_QUEUE_TAIL_S;
+    kr_que_size(que) = DEFAULT_QUEUE_SIZE_S;
+
+    return KR_SUCCESS;
+
+}
+
+/*
+ * ******************
+ * # Freeing Memory #
+ * ******************
+*/
+
+KrError _kr_stk_free(KrByte** stk) {
+
+    if (!stk || !*stk) { return KR_ERR_NULL_INPUT; }
+
+    KrByte* handle = *stk - STACK_HEADER_SIZE_B;
+
+    free((void*)handle);
+    *stk = nullptr;
+
+    return KR_SUCCESS;
+
+}
+
+KrError _kr_que_free(KrByte** que) {
+
+    if (!que || !*que) { return KR_ERR_NULL_INPUT; }
+
+    KrByte* header = *que - QUEUE_HEADER_SIZE_B;
+
+    free((void*)header);
+    *que = nullptr;
+
+    return KR_SUCCESS;
+
+}
+
+KrError _kr_dque_free(KrByte** dque) {
+
+    if (dque == nullptr || *dque == nullptr) { return KR_ERR_NULL_INPUT; }
+
+    KrDqueHeader* header = kr_dque_hdr(*dque);
+
+    free((void*)header);
+    *dque = nullptr;
+
+    return KR_SUCCESS;
+
+}
+
+#endif
